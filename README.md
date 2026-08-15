@@ -2,7 +2,7 @@
 
 Open-source local voice-dictation application for Windows. Modern C#, Avalonia UI, NVIDIA-accelerated streaming ASR via sherpa-onnx + NVIDIA Nemotron 3.5 ASR, Vosk command recognition.
 
-**Current status: Phase 0 (research) + Phase 1 (console prototype) complete.** See [REPORT-PHASE1.md](REPORT-PHASE1.md) for findings.
+**Current status: Phases 0–2 complete (research, console prototype, multi-session streaming architecture).** See [REPORT-PHASE1.md](REPORT-PHASE1.md) and [REPORT-PHASE2.md](REPORT-PHASE2.md) for findings.
 
 ## Verified stack (Phase 0/1)
 
@@ -54,7 +54,7 @@ Microphone: omit `--wav` (press Enter to stop and finalize). `--list-devices` sh
 
 - Phase 0 — research ✓
 - Phase 1 — Nemotron console prototype ✓
-- Phase 2 — multi-session streaming architecture
+- Phase 2 — multi-session streaming architecture ✓
 - Phase 3 — durable temporary recovery
 - Phase 4 — Vosk commands
 - Phase 5 — paste and clipboard system

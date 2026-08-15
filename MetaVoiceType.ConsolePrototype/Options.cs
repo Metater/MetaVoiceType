@@ -61,9 +61,13 @@ public class Options
     [Option("output", Required = false, HelpText = "Write the final transcript to this UTF-8 file.")]
     public string? OutputFile { get; set; }
 
-    [Option("concurrency-probe", Required = false, Default = false,
-        HelpText = "Run the two-stream concurrency probe on the WAV file.")]
-    public bool ConcurrencyProbe { get; set; }
+    [Option("unit-tests", Required = false, Default = false,
+        HelpText = "Run pure C# unit tests for session/coordinator logic.")]
+    public bool UnitTests { get; set; }
+
+    [Option("phase2", Required = false, Default = false,
+        HelpText = "Run the Phase 2 concurrency harness (overlap, stress chain, fault isolation).")]
+    public bool Phase2 { get; set; }
 
     [Option("enable-endpoint", Required = false, Default = false,
         HelpText = "Enable sherpa endpoint detection.")]

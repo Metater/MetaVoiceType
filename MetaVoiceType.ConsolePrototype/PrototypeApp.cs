@@ -24,26 +24,26 @@ public sealed class PrototypeApp
             return 0;
         }
 
-        _log.LogInformation("sherpa-onnx version: {Sherpa}", SherpaOnnx.VersionInfo.Version);
-        _log.LogInformation("onnxruntime version: {Ort}", SherpaOnnx.VersionInfo.OnnxruntimeVersion);
+        if (_opts.UnitTests)
+            return await UnitTests.RunAsync(_log, ct).ConfigureAwait(false);
 
         var config = BuildRecognizerConfig();
-        _log.LogInformation("Creating recognizer (provider={Provider}, device={Device}, language={Lang})...",
-            _opts.Provider, _opts.Device, _opts.Language);
+        _log.LogInformation("Creating recognizer (provider={Provider}, device={Device})...",
+            _opts.Provider, _opts.Device);
         var sw = Stopwatch.StartNew();
-        using var engine = new TranscriptionEngine(config, _log);
+        using var backend = new SherpaAsrBackend(config, _log);
         sw.Stop();
-        _log.LogInformation("Recognizer created in {Ms:F1}ms.", sw.Elapsed.TotalMilliseconds);
+        _log.LogInformation("Backend ready in {Ms:F1}ms total.", sw.Elapsed.TotalMilliseconds);
 
-        if (_opts.ConcurrencyProbe)
+        if (_opts.Phase2)
         {
-            await ConcurrencyProbe.RunAsync(_opts, _log, ct).ConfigureAwait(false);
-            return 0;
+            var harness = new Phase2Harness(_opts, _log, backend);
+            return await harness.RunAsync(ct).ConfigureAwait(false);
         }
 
         if (_opts.WavFile is not null)
         {
-            string text = await RunWavAsync(engine, ct).ConfigureAwait(false);
+            string text = await RunWavAsync(backend, ct).ConfigureAwait(false);
             Console.WriteLine();
             Console.WriteLine("FINAL TRANSCRIPT:");
             Console.WriteLine(text);
@@ -52,7 +52,7 @@ public sealed class PrototypeApp
             return 0;
         }
 
-        return await RunMicrophoneAsync(engine, ct).ConfigureAwait(false);
+        return await RunMicrophoneAsync(backend, ct).ConfigureAwait(false);
     }
 
     // ------------------------------------------------------------------ config
@@ -112,69 +112,70 @@ public sealed class PrototypeApp
 
     // -------------------------------------------------------------------- WAV
 
-    private async Task<string> RunWavAsync(TranscriptionEngine engine, CancellationToken ct)
+    private async Task<string> RunWavAsync(SherpaAsrBackend backend, CancellationToken ct)
     {
         _log.LogInformation("Streaming WAV {Path} in {Chunk}ms chunks, {Repeat}x repeat.",
             _opts.WavFile, _opts.WavChunkMs, _opts.WavRepeat);
         using var source = new WavFileSource(_opts.WavFile!, _opts.WavChunkMs, _opts.WavRepeat, _log);
-        using var session = engine.CreateSession("wav", _opts.Language);
 
-        var sw = Stopwatch.StartNew();
-        long lastRenderMs = 0;
+        // Phase 2 architecture for the single-WAV convenience path as well.
+        await using var worker = new DecodeWorker();
+        var coordinator = new SessionCoordinator(backend, worker);
+        RecordingSession session = coordinator.TryStart(_opts.Language)
+            ?? throw new InvalidOperationException("could not start session");
+        var pump = new CapturePump(source, coordinator, boundSession: session);
+        var pumpTask = pump.RunAsync(ct);
 
-        await foreach (float[] frame in source.ReadFramesAsync(ct).ConfigureAwait(false))
-        {
-            session.Feed(frame, source.SampleRate);
-            string partial = engine.Process(session);
+        // Feed the whole source, then stop and finalize.
+        await pumpTask.ConfigureAwait(false);
+        session.Stop();
+        worker.SignalFinalize(session);
 
-            if (sw.ElapsedMilliseconds - lastRenderMs >= 250)
-            {
-                lastRenderMs = sw.ElapsedMilliseconds;
-                if (session.HasNewPartial(partial))
-                    session.CommitPartial(partial);
-                _log.LogInformation("[{AudioSec:F1}s] {Text}", session.AudioSecondsFed, Truncate(partial, 90));
-            }
-        }
+        while (session.State == SessionState.Finalizing && !ct.IsCancellationRequested)
+            await Task.Delay(10, ct).ConfigureAwait(false);
 
-        var result = engine.FinalizeBlocking(session);
-        sw.Stop();
-
+        string text = session.FinalTranscript;
         _log.LogInformation(
-            "WAV run: {AudioSec:F1}s audio, {ProcessMs:F0}ms processing, " +
-            "{Rate:F2} ms processing per audio second.",
-            session.AudioSecondsFed,
-            session.GetProcessMsPerAudioSecond() * session.AudioSecondsFed,
-            session.GetProcessMsPerAudioSecond());
+            "WAV run: {AudioSec:F1}s audio; finalization {FinalMs:F1}ms.",
+            session.AudioSecondsFed, session.FinalizationLatencyMs);
 
-        return result.Text;
+        await worker.DisposeAsync().ConfigureAwait(false);
+        return text;
     }
 
     // ------------------------------------------------------------ microphone
 
-    private async Task<int> RunMicrophoneAsync(TranscriptionEngine engine, CancellationToken ct)
+    private async Task<int> RunMicrophoneAsync(SherpaAsrBackend backend, CancellationToken ct)
     {
         using var source = new MicrophoneAudioSource(_opts.MicDevice, _log);
-        using var session = engine.CreateSession("mic", _opts.Language);
+        await using var worker = new DecodeWorker();
+        var coordinator = new SessionCoordinator(backend, worker);
+
+        RecordingSession? session = coordinator.TryStart(_opts.Language);
+        if (session is null)
+            throw new InvalidOperationException("could not start session");
 
         string lastPartial = string.Empty;
         var renderSw = Stopwatch.StartNew();
         long? startedAt = null;
-        bool finalizing = false;
-        string finalText = string.Empty;
-        var finalizeSw = new Stopwatch();
 
         var keyboardTask = Task.Run(async () =>
         {
-            while (!ct.IsCancellationRequested && !finalizing)
+            while (!ct.IsCancellationRequested)
             {
                 if (Console.KeyAvailable && Console.ReadKey(intercept: true).Key == ConsoleKey.Enter)
                 {
-                    _log.LogInformation("Enter pressed — finalizing session.");
-                    finalizeSw.Start();
-                    var result = engine.FinalizeBlocking(session);
-                    finalizeSw.Stop();
-                    finalText = result.Text;
-                    finalizing = true;
+                    _log.LogInformation("Enter pressed — stopping active session.");
+                    RecordingSession? active = coordinator.Active;
+                    if (active is { IsRecording: true })
+                    {
+                        active.Stop();
+                        worker.SignalFinalize(active);
+                    }
+                    // Start a fresh session immediately: Enter = stop AND new
+                    // session, proving the slot is free while the old one
+                    // finalizes. (Phase 2 demonstration.)
+                    coordinator.TryStart(_opts.Language);
                     return;
                 }
                 await Task.Delay(50, ct).ConfigureAwait(false);
@@ -183,57 +184,64 @@ public sealed class PrototypeApp
 
         try
         {
-            await foreach (float[] frame in source.ReadFramesAsync(ct).ConfigureAwait(false))
+            var pump = new CapturePump(source, coordinator);
+            var pumpTask = pump.RunAsync(ct);
+            while (!pumpTask.IsCompleted)
             {
-                startedAt ??= Environment.TickCount64;
-                session.Feed(frame, source.SampleRate);
-                string partial = engine.Process(session);
-
-                if (renderSw.ElapsedMilliseconds >= 250)
+                RecordingSession? active = coordinator.Active;
+                if (active is { IsRecording: true })
                 {
-                    renderSw.Restart();
-                    if (session.HasNewPartial(partial))
+                    string partial = active.PartialTranscript;
+                    if (partial != lastPartial)
                     {
-                        session.CommitPartial(partial);
                         lastPartial = partial;
+                        renderSw.Restart();
+                        if (startedAt is { } start)
+                        {
+                            double audioSec = (Environment.TickCount64 - start) / 1000.0;
+                            double lagSec = Math.Max(audioSec - active.AudioSecondsFed, 0);
+                            int dropped = ((MicrophoneAudioSource)source).DrainDroppedFrameCount();
+                            Console.Write($"\r[{audioSec,6:F1}s] queue={worker.QueueDepth,2} " +
+                                $"decode={worker.LastDecodeMs,6:F2}ms lag={lagSec,4:F1}s " +
+                                $"dropped={dropped,3} | {Truncate(lastPartial, 90)}    ");
+                        }
                     }
-
-                    double audioSec = (Environment.TickCount64 - startedAt.Value) / 1000.0;
-                    double lagSec = Math.Max(audioSec - session.AudioSecondsFed, 0);
-                    int dropped = ((MicrophoneAudioSource)source).DrainDroppedFrameCount();
-
-                    Console.Write($"\r[{audioSec,6:F1}s] proc={session.GetProcessMsPerAudioSecond(),5:F2}ms/s " +
-                        $"lag={lagSec,4:F1}s dropped={dropped,3} | {Truncate(lastPartial, 100)}    ");
                 }
-
-                if (finalizing)
-                    break;
+                else
+                {
+                    startedAt = null;
+                }
+                await Task.Delay(200, ct).ConfigureAwait(false);
             }
+            await pumpTask.ConfigureAwait(false);
         }
         finally
         {
             await keyboardTask.ConfigureAwait(false);
         }
 
-        if (!finalizing)
+        // Finalize whatever is active at exit.
+        RecordingSession? final = coordinator.Active;
+        if (final is { IsRecording: true })
         {
-            // Capture ended without Enter (Ctrl+C path): still finalize.
-            finalizeSw.Start();
-            var result = engine.FinalizeBlocking(session);
-            finalizeSw.Stop();
-            finalText = result.Text;
+            final.Stop();
+            worker.SignalFinalize(final);
         }
 
-        Console.WriteLine();
-        Console.WriteLine("FINAL TRANSCRIPT:");
-        Console.WriteLine(finalText);
-        Console.WriteLine();
-        _log.LogInformation(
-            "Finalization took {Ms:F1}ms. Processing cost: {Rate:F2} ms per audio second.",
-            finalizeSw.Elapsed.TotalMilliseconds, session.GetProcessMsPerAudioSecond());
+        while (coordinator.All.Any(s => s.IsFinalizing) && !ct.IsCancellationRequested)
+            await Task.Delay(10, ct).ConfigureAwait(false);
 
-        if (_opts.OutputFile is not null)
-            await File.WriteAllTextAsync(_opts.OutputFile, finalText, Encoding.UTF8, ct).ConfigureAwait(false);
+        Console.WriteLine();
+        Console.WriteLine("SESSIONS:");
+        foreach (RecordingSession s in coordinator.All)
+        {
+            Console.WriteLine($"  {s.Id} [{s.State}] {Truncate(s.FinalTranscript, 80)}");
+        }
+
+        if (_opts.OutputFile is not null && final is not null)
+            await File.WriteAllTextAsync(_opts.OutputFile, final.FinalTranscript, Encoding.UTF8, ct).ConfigureAwait(false);
+
+        await worker.DisposeAsync().ConfigureAwait(false);
         return 0;
     }
 

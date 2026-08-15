@@ -23,18 +23,24 @@ public sealed class MicrophoneAudioSource : IAudioSource
     private PortAudioSharp.Stream? _stream;
     private TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private volatile int _droppedFrames;
+    private long _maxObservedDepth;
 
     public int SampleRate => (int)_sampleRate;
+
+    /// <summary>Peak number of queued frames observed (diagnostics).</summary>
+    public long MaxObservedDepth => Interlocked.Read(ref _maxObservedDepth);
 
     public MicrophoneAudioSource(int deviceIndex, ILogger log)
     {
         _deviceIndex = deviceIndex;
         _log = log;
+        // Bounded to bound memory; FullMode.Wait means we prefer blocking the
+        // capture thread briefly over silently discarding dictation audio.
         _channel = Channel.CreateBounded<float[]>(new BoundedChannelOptions(64)
         {
             SingleReader = true,
             SingleWriter = true,
-            FullMode = BoundedChannelFullMode.DropOldest,
+            FullMode = BoundedChannelFullMode.Wait,
             AllowSynchronousContinuations = false
         });
     }
@@ -100,8 +106,31 @@ public sealed class MicrophoneAudioSource : IAudioSource
         var samples = new float[frameCount];
         Marshal.Copy(input, samples, 0, (int)frameCount);
 
+        // FullMode.Wait: blocks the capture thread when the queue is full
+        // rather than discarding dictation audio. Under normal operation the
+        // consumer stays far ahead, so this never blocks.
         if (!_channel.Writer.TryWrite(samples))
-            Interlocked.Increment(ref _droppedFrames);
+        {
+            if (_channel.Writer.WaitToWriteAsync().AsTask().GetAwaiter().GetResult())
+            {
+                if (!_channel.Writer.TryWrite(samples))
+                    Interlocked.Increment(ref _droppedFrames);
+            }
+            else
+            {
+                Interlocked.Increment(ref _droppedFrames);
+            }
+        }
+
+        long depth = _channel.Reader.Count;
+        long max = Interlocked.Read(ref _maxObservedDepth);
+        while (depth > max)
+        {
+            long current = Interlocked.CompareExchange(ref _maxObservedDepth, depth, max);
+            if (current == max)
+                break;
+            max = current;
+        }
         return StreamCallbackResult.Continue;
     }
 
@@ -109,7 +138,7 @@ public sealed class MicrophoneAudioSource : IAudioSource
     {
         int d = Interlocked.Exchange(ref _droppedFrames, 0);
         if (d > 0)
-            _log.LogWarning("Dropped {Count} audio frames (consumer fell behind).", d);
+            _log.LogError("DROPPED {Count} audio frames — dictation audio was lost!", d);
         return d;
     }
 

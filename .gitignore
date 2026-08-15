@@ -488,4 +488,6 @@ $RECYCLE.BIN/
 *.tar.bz2
 *.zip
 long-test.txt
+phase2-*.txt
+worker-trace.txt
 .commandcode/
