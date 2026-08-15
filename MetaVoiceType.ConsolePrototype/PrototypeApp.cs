@@ -20,12 +20,15 @@ public sealed class PrototypeApp
     {
         if (_opts.ListDevices)
         {
-            ListDevices();
+            await ListDevicesAsync().ConfigureAwait(false);
             return 0;
         }
 
         if (_opts.UnitTests)
             return await UnitTests.RunAsync(_log, ct).ConfigureAwait(false);
+
+        if (_opts.SoakMinutes > 0)
+            return await RunSoakAsync(ct).ConfigureAwait(false);
 
         var config = BuildRecognizerConfig();
         _log.LogInformation("Creating recognizer (provider={Provider}, device={Device})...",
@@ -38,6 +41,12 @@ public sealed class PrototypeApp
         if (_opts.Phase2)
         {
             var harness = new Phase2Harness(_opts, _log, backend);
+            return await harness.RunAsync(ct).ConfigureAwait(false);
+        }
+
+        if (_opts.Phase3)
+        {
+            var harness = new Phase3Harness(_opts, _log, backend);
             return await harness.RunAsync(ct).ConfigureAwait(false);
         }
 
@@ -87,8 +96,26 @@ public sealed class PrototypeApp
 
     // ---------------------------------------------------------------- devices
 
-    private void ListDevices()
+    private async Task ListDevicesAsync()
     {
+        Console.WriteLine("=== NAudio (WASAPI) capture devices ===");
+        using (var enumerator = new NAudio.CoreAudioApi.MMDeviceEnumerator())
+        {
+            var devices = enumerator.EnumerateAudioEndPoints(
+                NAudio.CoreAudioApi.DataFlow.Capture,
+                NAudio.CoreAudioApi.DeviceState.Active).ToList();
+            var defaultDevice = enumerator.GetDefaultAudioEndpoint(
+                NAudio.CoreAudioApi.DataFlow.Capture,
+                NAudio.CoreAudioApi.Role.Console);
+            for (int i = 0; i < devices.Count; i++)
+            {
+                var d = devices[i];
+                Console.WriteLine($"  [{i}]{(d.ID == defaultDevice.ID ? " (default)" : "")} {d.FriendlyName}");
+            }
+        }
+
+        Console.WriteLine();
+        Console.WriteLine("=== PortAudio devices (comparison) ===");
         PortAudio.Initialize();
         try
         {
@@ -108,6 +135,75 @@ public sealed class PrototypeApp
         {
             PortAudio.Terminate();
         }
+    }
+
+    // ---------------------------------------------------------------- soak
+
+    private async Task<int> RunSoakAsync(CancellationToken ct)
+    {
+        _log.LogInformation("SOAK: capturing from microphone for {Minutes} minutes (capture only, no ASR).",
+            _opts.SoakMinutes);
+
+        using IAudioSource source = CreateMicSource();
+        long frames = 0;
+        long maxDepth = 0;
+        int dropped = 0;
+        var sw = Stopwatch.StartNew();
+        var deadline = TimeSpan.FromMinutes(_opts.SoakMinutes);
+
+        try
+        {
+            await foreach (float[] frame in source.ReadFramesAsync(ct).ConfigureAwait(false))
+            {
+                frames++;
+                if (source is NaudioCaptureSource n)
+                {
+                    maxDepth = Math.Max(maxDepth, n.MaxObservedDepth);
+                    dropped = n.DroppedFrames;
+                }
+                else if (source is MicrophoneAudioSource m)
+                {
+                    maxDepth = Math.Max(maxDepth, m.MaxObservedDepth);
+                    dropped += m.DrainDroppedFrameCount();
+                }
+                if (sw.Elapsed >= deadline)
+                    break;
+                if (frames % 1000 == 0)
+                    _log.LogInformation("SOAK: {Frames} frames, {Sec:F0}s elapsed, maxQueue={Depth}, dropped={Dropped}",
+                        frames, sw.Elapsed.TotalSeconds, maxDepth, dropped);
+            }
+        }
+        finally
+        {
+            sw.Stop();
+        }
+
+        double minutes = sw.Elapsed.TotalMinutes;
+        _log.LogInformation(
+            "SOAK COMPLETE: {Minutes:F1} min, {Frames} frames, maxQueueDepth={Depth}, dropped={Dropped}",
+            minutes, frames, maxDepth, dropped);
+
+        Console.WriteLine();
+        Console.WriteLine("=== MICROPHONE SOAK RESULT ===");
+        Console.WriteLine($"Backend           : {source.GetType().Name}");
+        Console.WriteLine($"Duration          : {minutes:F1} min");
+        Console.WriteLine($"Frames captured   : {frames}");
+        Console.WriteLine($"Max queue depth   : {maxDepth}");
+        Console.WriteLine($"Frames dropped    : {dropped}");
+        Console.WriteLine(dropped == 0 ? "VERDICT: PASS" : "VERDICT: FAIL");
+        return dropped == 0 ? 0 : 1;
+    }
+
+    private IAudioSource CreateMicSource()
+    {
+        string backend = _opts.MicBackend.ToLowerInvariant();
+        return backend switch
+        {
+            "naudio" or "wasapi" or "" => new NaudioCaptureSource(_opts.MicDevice, _log),
+            "portaudio" or "pa" => new MicrophoneAudioSource(_opts.MicDevice, _log),
+            _ => throw new ArgumentException(
+                $"Unknown microphone backend '{_opts.MicBackend}'. Use 'naudio' or 'portaudio'.")
+        };
     }
 
     // -------------------------------------------------------------------- WAV
@@ -147,7 +243,7 @@ public sealed class PrototypeApp
 
     private async Task<int> RunMicrophoneAsync(SherpaAsrBackend backend, CancellationToken ct)
     {
-        using var source = new MicrophoneAudioSource(_opts.MicDevice, _log);
+        using IAudioSource source = CreateMicSource();
         await using var worker = new DecodeWorker();
         var coordinator = new SessionCoordinator(backend, worker);
 
@@ -200,10 +296,21 @@ public sealed class PrototypeApp
                         {
                             double audioSec = (Environment.TickCount64 - start) / 1000.0;
                             double lagSec = Math.Max(audioSec - active.AudioSecondsFed, 0);
-                            int dropped = ((MicrophoneAudioSource)source).DrainDroppedFrameCount();
-                            Console.Write($"\r[{audioSec,6:F1}s] queue={worker.QueueDepth,2} " +
-                                $"decode={worker.LastDecodeMs,6:F2}ms lag={lagSec,4:F1}s " +
-                                $"dropped={dropped,3} | {Truncate(lastPartial, 90)}    ");
+                            int dropped = source switch
+                            {
+                                NaudioCaptureSource n => n.DrainDroppedFrameCount(),
+                                MicrophoneAudioSource m => m.DrainDroppedFrameCount(),
+                                _ => 0
+                            };
+                            long captureDepth = source switch
+                            {
+                                NaudioCaptureSource n => n.MaxObservedDepth,
+                                MicrophoneAudioSource m => m.MaxObservedDepth,
+                                _ => 0
+                            };
+                            Console.Write($"\r[{audioSec,6:F1}s] capQ={captureDepth,2} " +
+                                $"asrQ={worker.QueueDepth,2} decode={worker.LastDecodeMs,6:F2}ms " +
+                                $"lag={lagSec,4:F1}s dropped={dropped,3} | {Truncate(lastPartial, 90)}    ");
                         }
                     }
                 }

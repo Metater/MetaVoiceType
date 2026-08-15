@@ -489,5 +489,7 @@ $RECYCLE.BIN/
 *.zip
 long-test.txt
 phase2-*.txt
+phase3-*.txt
+soak*.txt
 worker-trace.txt
 .commandcode/

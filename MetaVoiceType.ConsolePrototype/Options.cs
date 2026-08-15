@@ -69,6 +69,18 @@ public class Options
         HelpText = "Run the Phase 2 concurrency harness (overlap, stress chain, fault isolation).")]
     public bool Phase2 { get; set; }
 
+    [Option("mic-backend", Required = false, Default = "naudio",
+        HelpText = "Microphone backend: naudio | portaudio")]
+    public string MicBackend { get; set; } = "naudio";
+
+    [Option("soak-minutes", Required = false, Default = 0,
+        HelpText = "Run a microphone capture soak test for N minutes (capture only).")]
+    public int SoakMinutes { get; set; }
+
+    [Option("phase3", Required = false, Default = false,
+        HelpText = "Run the Phase 3 recovery + history harness.")]
+    public bool Phase3 { get; set; }
+
     [Option("enable-endpoint", Required = false, Default = false,
         HelpText = "Enable sherpa endpoint detection.")]
     public bool EnableEndpoint { get; set; }

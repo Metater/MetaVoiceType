@@ -11,6 +11,7 @@
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.3.0" />
     <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
     <PackageReference Include="PortAudioSharp2" Version="1.0.6" />
   </ItemGroup>
