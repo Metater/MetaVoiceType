@@ -1,0 +1,158 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:MetaVoiceType.UI.ViewModels"
+        xmlns:models="using:MetaVoiceType.Core.Models"
+        xmlns:material="using:Material.Icons.Avalonia"
+        x:Class="MetaVoiceType.UI.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="MetaVoiceType" Width="980" Height="720" MinWidth="760" MinHeight="560"
+        Background="#0D0F15" WindowStartupLocation="CenterScreen">
+  <Grid>
+    <Grid IsVisible="{Binding !ShowOnboarding}" RowDefinitions="72,*">
+      <Border Grid.Row="0" BorderBrush="#242834" BorderThickness="0,0,0,1" Padding="28,0">
+        <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+            <Border Width="34" Height="34" CornerRadius="10" Background="#7C5CFC">
+              <material:MaterialIcon Kind="Waveform" Foreground="White" Width="20" Height="20" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <TextBlock Text="MetaVoiceType" FontWeight="SemiBold" FontSize="19" VerticalAlignment="Center"/>
+          </StackPanel>
+          <Button Grid.Column="1" Classes="ghost" Command="{Binding ToggleSettingsCommand}" ToolTip.Tip="Settings">
+            <StackPanel Orientation="Horizontal" Spacing="8"><material:MaterialIcon Kind="CogOutline" Width="20"/><TextBlock Text="Settings"/></StackPanel>
+          </Button>
+        </Grid>
+      </Border>
+
+      <ScrollViewer Grid.Row="1" IsVisible="{Binding !ShowSettings}">
+        <StackPanel Margin="32,26" Spacing="22" MaxWidth="900">
+          <Border Classes="card">
+            <Grid ColumnDefinitions="*,Auto">
+              <StackPanel Spacing="5">
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding State.CommandListenerActive}">
+                  <Ellipse Width="9" Height="9" Fill="#50D890" VerticalAlignment="Center"/>
+                  <TextBlock Text="COMMAND LISTENING ACTIVE" Foreground="#63DCA0" FontWeight="SemiBold" FontSize="12"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding !State.CommandListenerActive}">
+                  <Ellipse Width="9" Height="9" Fill="#FFB86C" VerticalAlignment="Center"/>
+                  <TextBlock Text="COMMAND MODEL NOT INSTALLED" Foreground="#FFB86C" FontWeight="SemiBold" FontSize="12"/>
+                </StackPanel>
+                <TextBlock Text="{Binding State.StatusMessage}" Classes="muted"/>
+              </StackPanel>
+              <TextBlock Grid.Column="1" Text="{Binding State.Acceleration, StringFormat='Nemotron · {0}'}" Classes="muted" VerticalAlignment="Center"/>
+            </Grid>
+          </Border>
+
+          <StackPanel HorizontalAlignment="Center" Spacing="10">
+            <Button Classes="primary" Command="{Binding ToggleRecordingCommand}" MinWidth="180">
+              <StackPanel Orientation="Horizontal" Spacing="9" HorizontalAlignment="Center">
+                <material:MaterialIcon Kind="RecordCircleOutline" Width="22"/>
+                <TextBlock Text="Start / Stop Recording" FontWeight="SemiBold"/>
+              </StackPanel>
+            </Button>
+            <ProgressBar Width="260" Height="5" Minimum="0" Maximum="1" Value="{Binding State.AudioLevel}"/>
+          </StackPanel>
+
+          <Border Classes="card" MinHeight="150">
+            <StackPanel Spacing="12">
+              <Grid ColumnDefinitions="*,Auto,Auto,Auto">
+                <TextBlock Text="Live transcript" FontWeight="SemiBold"/>
+                <Button Grid.Column="1" Classes="ghost" Command="{Binding CopyCommand}" ToolTip.Tip="Copy current transcript"><material:MaterialIcon Kind="ContentCopy"/></Button>
+                <Button Grid.Column="2" Classes="ghost" Command="{Binding PasteCommand}" ToolTip.Tip="Paste here"><material:MaterialIcon Kind="ContentPaste"/></Button>
+                <Button Grid.Column="3" Classes="ghost" Command="{Binding CancelRecordingCommand}" ToolTip.Tip="Cancel and save"><material:MaterialIcon Kind="CloseCircleOutline"/></Button>
+              </Grid>
+              <TextBlock Text="{Binding State.LiveTranscript}" TextWrapping="Wrap" FontSize="17" LineHeight="25"/>
+              <TextBlock Text="Your words will appear here while recording." IsVisible="{Binding !State.IsRecording}" Classes="muted"/>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="Recent" Classes="heading" FontSize="19"/>
+          <ItemsControl ItemsSource="{Binding State.History}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate x:DataType="models:TranscriptRecord">
+                <Border Classes="card" Margin="0,0,0,10" Padding="18">
+                  <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto">
+                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" MaxHeight="72" TextTrimming="CharacterEllipsis"/>
+                    <TextBlock Grid.Row="1" Text="{Binding StartedAt, StringFormat='{}{0:g}'}" Classes="muted" FontSize="12" Margin="0,8,0,0"/>
+                    <StackPanel Grid.Column="1" Grid.RowSpan="2" Orientation="Horizontal" Spacing="4" Margin="16,0,0,0">
+                      <material:MaterialIcon Kind="ContentCopy" Foreground="#969CAD"/>
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer Grid.Row="1" IsVisible="{Binding ShowSettings}">
+        <StackPanel Margin="32,26" Spacing="18" MaxWidth="820">
+          <Grid ColumnDefinitions="Auto,*">
+            <Button Classes="ghost" Command="{Binding ToggleSettingsCommand}" ToolTip.Tip="Back"><material:MaterialIcon Kind="ArrowLeft"/></Button>
+            <TextBlock Grid.Column="1" Text="Settings" Classes="heading" Margin="12,0,0,0"/>
+          </Grid>
+          <Border Classes="card"><StackPanel Spacing="14">
+            <TextBlock Text="General" FontWeight="SemiBold" FontSize="18"/>
+            <CheckBox Content="Start MetaVoiceType when I sign in" IsChecked="{Binding StartWithWindows}"/>
+            <Grid ColumnDefinitions="180,*"><TextBlock Text="Theme" VerticalAlignment="Center"/><ComboBox Grid.Column="1" ItemsSource="{Binding Themes}" SelectedItem="{Binding Theme}"/></Grid>
+          </StackPanel></Border>
+          <Border Classes="card"><StackPanel Spacing="12">
+            <TextBlock Text="Voice commands" FontWeight="SemiBold" FontSize="18"/>
+            <TextBlock Text="This setting controls command recognition only; it does not limit dictation language." Classes="muted" TextWrapping="Wrap"/>
+            <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedVoiceLanguage}" DisplayMemberBinding="{Binding DisplayName}"/>
+            <Grid ColumnDefinitions="190,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
+              <TextBlock Text="Start Recording"/><TextBox Grid.Column="1" Text="{Binding StartRecordingPhrase}"/>
+              <TextBlock Grid.Row="1" Text="Stop Recording"/><TextBox Grid.Row="1" Grid.Column="1" Text="{Binding StopRecordingPhrase}"/>
+              <TextBlock Grid.Row="2" Text="Paste Here"/><TextBox Grid.Row="2" Grid.Column="1" Text="{Binding PasteHerePhrase}"/>
+              <TextBlock Grid.Row="3" Text="Cancel Recording"/><TextBox Grid.Row="3" Grid.Column="1" Text="{Binding CancelRecordingPhrase}"/>
+              <TextBlock Grid.Row="4" Text="Cancel Paste"/><TextBox Grid.Row="4" Grid.Column="1" Text="{Binding CancelPastePhrase}"/>
+              <TextBlock Grid.Row="5" Text="Copy Recording"/><TextBox Grid.Row="5" Grid.Column="1" Text="{Binding CopyPhrase}"/>
+            </Grid>
+            <StackPanel Orientation="Horizontal" Spacing="10"><Button Content="Reset this language" Command="{Binding ResetCommandsCommand}"/><Button Classes="primary" Content="Apply commands" Command="{Binding ApplySettingsCommand}"/></StackPanel>
+            <TextBlock Text="{Binding CommandValidation}" Foreground="#FFB86C"/>
+          </StackPanel></Border>
+          <Border Classes="card"><StackPanel Spacing="12">
+            <TextBlock Text="Dictation &amp; appearance" FontWeight="SemiBold" FontSize="18"/>
+            <Grid ColumnDefinitions="180,*"><TextBlock Text="Microphone"/><ComboBox Grid.Column="1" ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" DisplayMemberBinding="{Binding Name}"/></Grid>
+            <Grid ColumnDefinitions="180,*"><TextBlock Text="Dictation language"/><ComboBox Grid.Column="1" ItemsSource="{Binding DictationLanguages}" SelectedItem="{Binding SelectedDictationLanguage}"/></Grid>
+            <CheckBox Content="Copy transcript when recording stops" IsChecked="{Binding CopyOnStop}"/>
+            <CheckBox Content="Show floating recording pill" IsChecked="{Binding ShowFloatingPill}"/>
+            <Grid ColumnDefinitions="180,*"><TextBlock Text="Command cue volume"/><Slider Grid.Column="1" Minimum="0" Maximum="1" Value="{Binding CueVolume}"/></Grid>
+          </StackPanel></Border>
+          <Border Classes="card"><StackPanel Spacing="12"><TextBlock Text="Models" FontWeight="SemiBold" FontSize="18"/><Button Content="Download / reinstall voice model" Command="{Binding DownloadVoiceModelCommand}"/><Button Content="Download / reinstall Nemotron" Command="{Binding DownloadNemotronCommand}"/><ProgressBar Minimum="0" Maximum="100" Value="{Binding DownloadPercent}"/><TextBlock Text="{Binding DownloadStatus}" Classes="muted"/></StackPanel></Border>
+          <Border Classes="card"><StackPanel Spacing="12"><TextBlock Text="Updates" FontWeight="SemiBold" FontSize="18"/><TextBlock Text="{Binding UpdateStatus}" Classes="muted" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal" Spacing="10"><Button Content="Check for updates" Command="{Binding CheckForUpdatesCommand}"/><Button Classes="primary" Content="Download and restart" Command="{Binding UpdateNowCommand}" IsVisible="{Binding UpdateAvailable}"/></StackPanel></StackPanel></Border>
+          <Button Classes="primary" Content="Save settings" Command="{Binding ApplySettingsCommand}" HorizontalAlignment="Right"/>
+        </StackPanel>
+      </ScrollViewer>
+    </Grid>
+
+    <Grid IsVisible="{Binding ShowOnboarding}" Background="#0D0F15">
+      <Border Classes="card" Width="650" MaxHeight="610" VerticalAlignment="Center" HorizontalAlignment="Center" Padding="38">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <StackPanel Spacing="7"><TextBlock Text="MetaVoiceType" FontSize="14" Foreground="#9A8BFF" FontWeight="SemiBold"/><ProgressBar Minimum="1" Maximum="6" Value="{Binding OnboardingStep}" Height="4"/></StackPanel>
+          <StackPanel Grid.Row="1" Margin="0,30" Spacing="18" IsVisible="{Binding IsWelcomeStep}">
+            <TextBlock Text="Welcome to private, local dictation" Classes="heading"/>
+            <TextBlock Text="MetaVoiceType listens locally for your configured voice commands whenever it is running—even while hidden in the system tray." TextWrapping="Wrap" FontSize="16"/>
+            <TextBlock Text="Command listening does not mean ordinary speech is saved. Dictation audio is recorded only after Start Recording, processed locally, and removed after its transcript is safely stored." Classes="muted" TextWrapping="Wrap" LineHeight="22"/>
+          </StackPanel>
+          <StackPanel Grid.Row="1" Margin="0,30" Spacing="14" IsVisible="{Binding IsVoiceStep}">
+            <TextBlock Text="Choose your voice command language" Classes="heading"/><TextBlock Text="This controls phrases such as “start recording.” It does not limit languages you can dictate." Classes="muted" TextWrapping="Wrap"/>
+            <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedVoiceLanguage}" DisplayMemberBinding="{Binding DisplayName}"/>
+            <Button Classes="primary" Content="Download voice command model" Command="{Binding DownloadVoiceModelCommand}" IsEnabled="{Binding !IsDownloading}"/><ProgressBar Minimum="0" Maximum="100" Value="{Binding DownloadPercent}"/><TextBlock Text="{Binding DownloadStatus}" Classes="muted"/>
+          </StackPanel>
+          <StackPanel Grid.Row="1" Margin="0,30" Spacing="14" IsVisible="{Binding IsNemotronStep}">
+            <TextBlock Text="Install Nemotron dictation" Classes="heading"/><TextBlock Text="Nemotron provides high-quality streaming dictation entirely on this PC. The verified model download is about 475 MB." Classes="muted" TextWrapping="Wrap"/>
+            <Button Classes="primary" Content="Download Nemotron" Command="{Binding DownloadNemotronCommand}" IsEnabled="{Binding !IsDownloading}"/><ProgressBar Minimum="0" Maximum="100" Value="{Binding DownloadPercent}"/><TextBlock Text="{Binding DownloadStatus}" Classes="muted" TextWrapping="Wrap"/>
+          </StackPanel>
+          <StackPanel Grid.Row="1" Margin="0,30" Spacing="16" IsVisible="{Binding IsMicrophoneStep}"><TextBlock Text="Choose a microphone" Classes="heading"/><material:MaterialIcon Kind="Microphone" Width="52" Height="52" Foreground="#63DCA0"/><ComboBox ItemsSource="{Binding AudioDevices}" SelectedItem="{Binding SelectedAudioDevice}" DisplayMemberBinding="{Binding Name}"/><ProgressBar Minimum="0" Maximum="1" Value="{Binding State.AudioLevel}"/><TextBlock Text="The level meter uses the selected Windows capture device. You can change it later in Settings." Classes="muted" TextWrapping="Wrap"/></StackPanel>
+          <StackPanel Grid.Row="1" Margin="0,30" Spacing="16" IsVisible="{Binding IsStartupStep}"><TextBlock Text="Start with Windows?" Classes="heading"/><CheckBox Content="Start MetaVoiceType when I sign in" IsChecked="{Binding StartWithWindows}"/><TextBlock Text="When MetaVoiceType runs, it listens locally for your configured voice commands." Classes="muted" TextWrapping="Wrap"/></StackPanel>
+          <StackPanel Grid.Row="1" Margin="0,30" Spacing="16" IsVisible="{Binding IsReadyStep}"><TextBlock Text="You're ready" Classes="heading"/><TextBlock Text="Say your Start Recording phrase to begin, or press Ctrl + Space." FontSize="17" TextWrapping="Wrap"/><Border Background="#232032" CornerRadius="12" Padding="18"><TextBlock Text="{Binding StartRecordingPhrase}" FontSize="20" FontWeight="SemiBold" Foreground="#B9ADFF"/></Border></StackPanel>
+          <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
+            <Button Content="Back" Command="{Binding PreviousOnboardingCommand}" IsVisible="{Binding !IsWelcomeStep}"/>
+            <Button Grid.Column="2" Classes="primary" Content="Continue" Command="{Binding NextOnboardingCommand}" IsVisible="{Binding !IsReadyStep}"/>
+            <Button Grid.Column="2" Classes="primary" Content="Finish setup" Command="{Binding FinishOnboardingCommand}" IsVisible="{Binding IsReadyStep}"/>
+          </Grid>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</Window>

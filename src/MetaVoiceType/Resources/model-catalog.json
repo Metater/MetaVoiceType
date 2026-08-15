@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "nemotron": {
+    "id": "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11",
+    "displayName": "NVIDIA Nemotron 3.5 ASR Streaming 0.6B",
+    "archiveUrl": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11.tar.bz2",
+    "archiveType": "tar.bz2",
+    "extractedDirectory": "sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11",
+    "archiveSha256": "c6bf5e0df765f9d5b43bc9e0536d4b4b3e7d40bdf5ecf13e45f134c51c05ae3a",
+    "estimatedDownloadBytes": 475271763,
+    "requiredFiles": ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"],
+    "license": "OpenMDW-1.1",
+    "licenseUrl": "https://openmdw.ai/license/1-1/",
+    "defaultLanguage": "auto",
+    "files": {
+      "encoder": "encoder.int8.onnx",
+      "decoder": "decoder.int8.onnx",
+      "joiner": "joiner.int8.onnx",
+      "tokens": "tokens.txt"
+    },
+    "languages": {
+      "automaticDetection": true,
+      "transcriptionReady": ["en-US", "en-GB", "es-US", "es-ES", "fr-FR", "fr-CA", "it-IT", "pt-BR", "pt-PT", "nl-NL", "de-DE", "tr-TR", "ru-RU", "ar-AR", "hi-IN", "ja-JP", "ko-KR", "vi-VN", "uk-UA"],
+      "broadCoverage": ["pl-PL", "sv-SE", "cs-CZ", "nb-NO", "da-DK", "bg-BG", "fi-FI", "hr-HR", "sk-SK", "zh-CN", "hu-HU", "ro-RO", "et-EE"],
+      "adaptationReady": ["el-GR", "lt-LT", "lv-LV", "mt-MT", "sl-SI", "he-IL", "th-TH", "nn-NO"]
+    }
+  }
+}

@@ -1,0 +1,24 @@
+name: Release package
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  package:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - run: dotnet tool install --global vpk --version 1.2.0
+      - shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          ./scripts/package.ps1 -Version $version
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/releases/*

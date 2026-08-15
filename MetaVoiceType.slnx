@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/MetaVoiceType/MetaVoiceType.csproj" />
+  <Project Path="tests/MetaVoiceType.Tests/MetaVoiceType.Tests.csproj" />
+</Solution>
