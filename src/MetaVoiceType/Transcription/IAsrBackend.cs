@@ -1,16 +1,19 @@
 namespace MetaVoiceType.Transcription;
 
-public interface IAsrChannel : IDisposable
+public sealed record AsrRuntimeStatus(
+    string ModelId,
+    string ModelDisplayName,
+    string Provider,
+    string Acceleration,
+    string? GpuName,
+    string RuntimeVersion,
+    string? FallbackReason)
 {
-    void Accept(float[] samples);
-    void Finish();
-    bool IsReady();
-    string Decode();
-    string CurrentText { get; }
+    public string CompactLabel => $"{ModelDisplayName} · {Acceleration}";
 }
 
 public interface IAsrBackend : IDisposable
 {
-    string Acceleration { get; }
-    IAsrChannel CreateStream(string language);
+    AsrRuntimeStatus Status { get; }
+    string Transcribe(float[] samples);
 }

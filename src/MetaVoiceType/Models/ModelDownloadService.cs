@@ -30,11 +30,17 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
             progress?.Report(new("Extracting", new FileInfo(archive).Length, new FileInfo(archive).Length, 0));
             if (request.ArchiveType.Equals("zip", StringComparison.OrdinalIgnoreCase)) await ExtractZipAsync(archive, work, cancellationToken).ConfigureAwait(false);
             else if (request.ArchiveType.Equals("tar.bz2", StringComparison.OrdinalIgnoreCase)) await ExtractArchiveAsync(archive, work, cancellationToken).ConfigureAwait(false);
+            else if (request.ArchiveType.Equals("file", StringComparison.OrdinalIgnoreCase))
+            {
+                if (request.RequiredFiles.Count != 1) throw new InvalidDataException("Direct-file artifacts must declare exactly one required file.");
+                string extractedDirectory = Path.Combine(work, request.ExpectedDirectory);
+                Directory.CreateDirectory(extractedDirectory);
+                File.Move(archive, SafeTarget(extractedDirectory, request.RequiredFiles[0]));
+            }
             else throw new InvalidDataException($"Unsupported archive type '{request.ArchiveType}'.");
             string extracted = Path.Combine(work, request.ExpectedDirectory);
             if (!IsValidInstallation(extracted, request.RequiredFiles)) throw new InvalidDataException($"Archive did not contain a valid '{request.ExpectedDirectory}' installation.");
-            if (Directory.Exists(final)) Directory.Delete(final, true);
-            Directory.Move(extracted, final);
+            CommitDirectory(extracted, final);
             LogInstalled(logger, request.ExpectedDirectory);
             return final;
         }
@@ -42,6 +48,26 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
         {
             if (File.Exists(archive)) File.Delete(archive);
             if (Directory.Exists(work)) Directory.Delete(work, true);
+        }
+    }
+
+    private static void CommitDirectory(string extracted, string final)
+    {
+        string? backup = null;
+        try
+        {
+            if (Directory.Exists(final))
+            {
+                backup = final + ".previous-" + Guid.NewGuid().ToString("N");
+                Directory.Move(final, backup);
+            }
+            Directory.Move(extracted, final);
+            if (backup is not null) Directory.Delete(backup, true);
+        }
+        catch
+        {
+            if (!Directory.Exists(final) && backup is not null && Directory.Exists(backup)) Directory.Move(backup, final);
+            throw;
         }
     }
 

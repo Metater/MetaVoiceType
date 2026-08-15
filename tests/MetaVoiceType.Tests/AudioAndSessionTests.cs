@@ -25,13 +25,11 @@ public sealed class AudioAndSessionTests
     {
         var coordinator = new DecodeCoordinator(NullLogger<DecodeCoordinator>.Instance);
         coordinator.Start();
-        var aChannel = new FakeAsrChannel("alpha");
-        var a = new DictationSession("auto", aChannel);
+        var a = new DictationSession("auto", 0, new FakeAsrBackend("alpha"), new FlushSegmenter(new float[1600]));
         a.Accept(Pcm16Converter.Convert(new byte[640]));
-        a.Stop(false, false);
-        coordinator.Finalize(a);
+        coordinator.Finalize(a, a.Stop(false, false));
 
-        var b = new DictationSession("auto", new FakeAsrChannel("bravo"));
+        var b = new DictationSession("auto", 1600, new FakeAsrBackend("bravo"), new FlushSegmenter([]));
         Assert.Equal(DictationStatus.Recording, b.Status);
         Assert.NotEqual(a.Id, b.Id);
 
@@ -44,21 +42,52 @@ public sealed class AudioAndSessionTests
     }
 
     [Fact]
+    public async Task ControlAudioSpanIsRemovedBeforeBackendTranscription()
+    {
+        var backend = new RecordingAsrBackend();
+        using var session = new DictationSession("auto", 10_000, backend, new FlushSegmenter(new float[4_000]));
+        session.Accept(Pcm16Converter.Convert(new byte[8_000]));
+        IReadOnlyList<DictationSegment> jobs = session.Stop(false, false);
+        IReadOnlyList<DictationSegment> replacements = session.MarkControlSpan(11_500, 12_500);
+        Assert.Single(replacements);
+
+        var coordinator = new DecodeCoordinator(NullLogger<DecodeCoordinator>.Instance);
+        coordinator.Start();
+        coordinator.Finalize(session, jobs.Concat(replacements));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        while (session.Status == DictationStatus.Finalizing) await Task.Delay(10, timeout.Token);
+
+        Assert.Equal([1_500, 1_500], backend.Lengths);
+        Assert.Equal("1500 1500", session.FinalText);
+        await coordinator.DisposeAsync();
+    }
+
+    [Fact]
     public void AcceptedControlPhraseRemovedOnlyFromTail()
     {
         Assert.Equal("we discussed stop recording yesterday", TranscriptTailCleaner.RemoveAcceptedCommandTail("we discussed stop recording yesterday. stop recording", "stop recording"));
         Assert.Equal("stop recording is a phrase", TranscriptTailCleaner.RemoveAcceptedCommandTail("stop recording is a phrase", "stop recording"));
     }
 
-    private sealed class FakeAsrChannel(string result) : IAsrChannel
+    private sealed class FakeAsrBackend(string result) : IAsrBackend
     {
-        private bool _finished;
-        private bool _decoded;
-        public string CurrentText => _decoded ? result : "";
-        public void Accept(float[] samples) { }
-        public void Finish() => _finished = true;
-        public bool IsReady() => _finished && !_decoded;
-        public string Decode() { _decoded = true; return result; }
+        public AsrRuntimeStatus Status { get; } = new("test", "Test", "cpu", "CPU", null, "test", null);
+        public string Transcribe(float[] samples) => result;
+        public void Dispose() { }
+    }
+
+    private sealed class RecordingAsrBackend : IAsrBackend
+    {
+        public List<int> Lengths { get; } = [];
+        public AsrRuntimeStatus Status { get; } = new("test", "Test", "cpu", "CPU", null, "test", null);
+        public string Transcribe(float[] samples) { Lengths.Add(samples.Length); return samples.Length.ToString(System.Globalization.CultureInfo.InvariantCulture); }
+        public void Dispose() { }
+    }
+
+    private sealed class FlushSegmenter(float[] samples) : ISpeechSegmenter
+    {
+        public IReadOnlyList<SpeechAudioSegment> Accept(ReadOnlySpan<float> input) => [];
+        public IReadOnlyList<SpeechAudioSegment> Flush() => samples.Length == 0 ? [] : [new(0, samples)];
         public void Dispose() { }
     }
 }

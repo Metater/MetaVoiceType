@@ -1,8 +1,13 @@
-name: Release package
+name: Versioned Windows release
 
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: metavoicetype-release
+  cancel-in-progress: false
 
 jobs:
   package:
@@ -11,14 +16,36 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - run: dotnet tool install --global vpk --version 1.2.0
-      - shell: pwsh
+      - run: dotnet restore MetaVoiceType.slnx
+      - run: dotnet build MetaVoiceType.slnx -c Release --no-restore
+      - run: dotnet test MetaVoiceType.slnx -c Release --no-build --no-restore
+      - id: version
+        shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          ./scripts/package.ps1 -Version $version
-      - uses: softprops/action-gh-release@v2
+          [xml]$props = Get-Content Directory.Build.props
+          $version = [string]$props.Project.PropertyGroup.Version
+          if (-not $version) { throw "Directory.Build.props does not declare Version." }
+          $tag = "v$version"
+          git fetch --tags --force
+          $exists = [bool](git tag --list $tag)
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "exists=$($exists.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+      - if: steps.version.outputs.exists == 'false'
+        run: dotnet tool install --global vpk --version 1.2.0
+      - if: steps.version.outputs.exists == 'false'
+        shell: pwsh
+        run: ./scripts/package.ps1 -Version "${{ steps.version.outputs.version }}" -SkipTests
+      - if: steps.version.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: MetaVoiceType ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
           files: artifacts/releases/*

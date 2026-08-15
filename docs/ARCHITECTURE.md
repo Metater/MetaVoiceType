@@ -1,35 +1,28 @@
 # Architecture
 
-MetaVoiceType is a .NET 10 Avalonia desktop app hosted with `Microsoft.Extensions.Hosting`. Services are constructed once through dependency injection; UI state is exposed through CommunityToolkit.Mvvm observable models.
+MetaVoiceType is a .NET 10 Avalonia desktop app using dependency injection and CommunityToolkit.Mvvm.
 
-## Runtime flow
+## Audio and recognition flow
 
-1. `WindowsAudioCaptureService` opens one WASAPI capture at 16 kHz mono PCM16. The hardware callback only copies data into a channel.
-2. The audio dispatch worker sends every frame to Vosk. While a dictation session is active, it also sends the same frame to the session and recovery writer.
-3. `DecodeCoordinator` owns serialized sherpa-onnx decode work. A stopped session finalizes in the background while live work from a newly started session keeps priority.
-4. `RecoveryWriter` appends raw PCM and atomic metadata. Session commit waits for the recovery stream to flush and close, stores history atomically, then deletes PCM.
-5. `PasteCoordinator` provides a single cancellable clipboard/paste transaction and rejects duplicates while one is pending.
+1. `WindowsAudioCaptureService` captures 16 kHz mono PCM16 through WASAPI and moves callback data immediately to a managed channel.
+2. Every frame reaches the active Vosk command recognizer. A dictation session receives frames only after Start Recording.
+3. Vosk word timestamps are mapped to the shared global sample clock. Accepted control-command spans are removed from Parakeet audio before decode; a conservative text-tail fallback is used only when timestamps are absent. Confidence is passed through but never used.
+4. Sherpa's Silero VAD emits bounded speech segments. `DecodeCoordinator` serializes offline Parakeet work away from the audio callback and preserves segment order.
+5. A stopped session can finalize while a new session records. Stop→Paste binds to the stopped session and executes exactly once after its history commit.
+6. `RecoveryWriter` flushes PCM before `JsonHistoryStore` commits. PCM is deleted only after the transcript is durable.
 
-Vosk command language is separate from Nemotron dictation language. Command models, default command phrases, and per-language overrides belong to the Vosk side. Nemotron defaults to automatic language detection and uses an independent IETF locale selection when forced.
+Vosk command language is separate from Parakeet dictation mode. Vosk grammar rebuilds atomically when built-in or custom phrases change. Parakeet backend switching retires an old recognizer only after every session using it completes.
+
+## Provider bootstrap
+
+The strongly typed catalog describes artifacts, never transient provider state. At runtime the app detects NVIDIA with `nvidia-smi`, validates the downloaded official Sherpa CUDA bundle, validates bundled NuGet CUDA/cuDNN dependencies, and installs a managed DLL resolver before the first Sherpa native call. CUDA initialization is warmed up; any failure recreates the same model with the CPU provider and surfaces the reason.
 
 ## Storage
 
-User data lives below `%LOCALAPPDATA%\MetaVoiceType`:
+`%LOCALAPPDATA%\MetaVoiceType` contains schema-versioned settings, atomic history, `Models\Vosk`, `Models\Parakeet`, `Models\Runtime`, temporary `Recovery`, and rolling `Logs`. Logs exclude audio and transcript bodies.
 
-- `settings.json`: schema-versioned settings and per-language command overrides
-- `history.json`: atomic newest-first transcript history (maximum 100)
-- `Models\Vosk` and `Models\Nemotron`: committed model directories
-- `Recovery`: temporary raw PCM plus session metadata
-- `Logs`: rolling structured diagnostics; transcript bodies and microphone audio are never logged
+## Model transaction
 
-## Model installation transaction
+`catalog → temporary .part → SHA-256 → safe extraction → required-file validation → atomic directory commit`
 
-The strongly typed JSON catalog is validated at startup. Installation is generic:
-
-`catalog → .part download → SHA-256 when published → safe extraction → required-file validation → atomic directory move`
-
-Archive entries are resolved beneath a temporary root and path traversal is rejected. Runtime provider selection is not model metadata.
-
-## Windows integration
-
-SharpHook supplies the global Ctrl+Space listener and managed Ctrl+V simulation. TextCopy supplies clipboard access. Avalonia owns the main window, non-activating recording pill, and tray lifecycle. Velopack owns per-user setup and update application.
+ZIP and tar.bz2 entries are constrained beneath the temporary root. Direct-file artifacts use the same validation and commit path.

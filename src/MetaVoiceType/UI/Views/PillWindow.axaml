@@ -2,19 +2,19 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:MetaVoiceType.UI.ViewModels"
         xmlns:material="using:Material.Icons.Avalonia"
-        x:Class="MetaVoiceType.UI.Views.PillWindow"
-        x:DataType="vm:MainViewModel"
-        Width="430" Height="68" SizeToContent="Manual"
-        WindowDecorations="None" CanResize="False" ShowInTaskbar="False" ShowActivated="False"
-        Topmost="True" Background="Transparent" TransparencyLevelHint="AcrylicBlur,Transparent">
-  <Border Background="#F2181B25" CornerRadius="22" BorderBrush="#353A48" BorderThickness="1" Padding="18,10" BoxShadow="0 10 28 0 #66000000">
-    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto" ColumnSpacing="11">
-      <Ellipse Width="12" Height="12" Fill="#FF5573" VerticalAlignment="Center"/>
-      <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="Recording" FontWeight="SemiBold"/><TextBlock Text="Listening locally" FontSize="11" Foreground="#969CAD"/></StackPanel>
-      <ProgressBar Grid.Column="2" Minimum="0" Maximum="1" Value="{Binding State.AudioLevel}" Height="5" Margin="8,0" VerticalAlignment="Center"/>
-      <Button Grid.Column="3" Classes="ghost" Command="{Binding CopyCommand}" ToolTip.Tip="Copy current transcript"><material:MaterialIcon Kind="ContentCopy" Width="20"/></Button>
-      <Button Grid.Column="4" Classes="ghost" Command="{Binding PasteCommand}" ToolTip.Tip="Paste here"><material:MaterialIcon Kind="ContentPaste" Width="20"/></Button>
-      <Button Grid.Column="5" Classes="ghost" Command="{Binding CancelRecordingCommand}" ToolTip.Tip="Cancel and save"><material:MaterialIcon Kind="Close" Width="20"/></Button>
+        x:Class="MetaVoiceType.UI.Views.PillWindow" x:DataType="vm:MainViewModel"
+        Width="248" Height="62" WindowDecorations="None" CanResize="False" ShowInTaskbar="False" ShowActivated="False"
+        Topmost="True" Background="Transparent" TransparencyLevelHint="AcrylicBlur,Transparent"
+        PointerEntered="PillPointerEntered" PointerExited="PillPointerExited">
+  <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="21" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="14,9" BoxShadow="0 10 28 0 #66000000">
+    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="8">
+      <Border Width="16" Height="16" CornerRadius="8" Background="{DynamicResource DangerSoftBrush}" VerticalAlignment="Center"><Ellipse Width="9" Height="9" Fill="{DynamicResource DangerBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+      <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="Recording" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="{Binding ElapsedText}" FontSize="11" Classes="muted"/></StackPanel>
+      <ProgressBar Grid.Column="2" Minimum="0" Maximum="1" Value="{Binding State.AudioLevel}" Height="5" Margin="7,0" MinWidth="66" VerticalAlignment="Center"/>
+      <Button Grid.Column="3" Classes="ghost" Command="{Binding CopyCommand}" IsVisible="{Binding PillExpanded}" ToolTip.Tip="Copy current transcript"><material:MaterialIcon Kind="ContentCopy" Width="18"/></Button>
+      <Button Grid.Column="4" Classes="ghost" Command="{Binding PasteCommand}" IsVisible="{Binding PillExpanded}" ToolTip.Tip="Stop and paste here"><material:MaterialIcon Kind="ContentPaste" Width="18"/></Button>
+      <Button Grid.Column="5" Classes="ghost" Command="{Binding StopRecordingCommand}" IsVisible="{Binding PillExpanded}" ToolTip.Tip="Stop recording"><material:MaterialIcon Kind="StopCircleOutline" Width="19"/></Button>
+      <Button Grid.Column="6" Classes="ghost danger" Command="{Binding CancelRecordingCommand}" ToolTip.Tip="Cancel and save to history"><material:MaterialIcon Kind="Close" Width="19"/></Button>
     </Grid>
   </Border>
 </Window>

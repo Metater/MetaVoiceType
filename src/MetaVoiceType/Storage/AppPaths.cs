@@ -11,14 +11,15 @@ public sealed class AppPaths
     public string SettingsFile => Path.Combine(Root, "settings.json");
     public string HistoryFile => Path.Combine(Root, "history.json");
     public string Models => Path.Combine(Root, "Models");
-    public string NemotronModels => Path.Combine(Models, "Nemotron");
+    public string DictationModels => Path.Combine(Models, "Parakeet");
+    public string RuntimeModels => Path.Combine(Models, "Runtime");
     public string VoskModels => Path.Combine(Models, "Vosk");
     public string Recovery => Path.Combine(Root, "Recovery");
     public string Logs => Path.Combine(Root, "Logs");
 
     public void EnsureCreated()
     {
-        foreach (string path in new[] { Root, Models, NemotronModels, VoskModels, Recovery, Logs })
+        foreach (string path in new[] { Root, Models, DictationModels, RuntimeModels, VoskModels, Recovery, Logs })
             Directory.CreateDirectory(path);
     }
 }

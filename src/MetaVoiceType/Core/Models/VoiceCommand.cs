@@ -22,3 +22,8 @@ public static class VoiceCommandKeys
         [VoiceCommand.CopyRecordingToClipboard] = "copyRecordingToClipboard"
     };
 }
+
+public sealed record VoiceCommandDefinition(string Id, string Phrase, VoiceCommand? BuiltInCommand = null)
+{
+    public static VoiceCommandDefinition BuiltIn(VoiceCommand command, string phrase) => new(VoiceCommandKeys.All[command], phrase, command);
+}

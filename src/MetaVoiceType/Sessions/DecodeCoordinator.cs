@@ -5,84 +5,71 @@ namespace MetaVoiceType.Sessions;
 
 public sealed partial class DecodeCoordinator(ILogger<DecodeCoordinator> logger) : IAsyncDisposable
 {
-    private readonly Channel<DictationSession> _live = Channel.CreateUnbounded<DictationSession>();
-    private readonly Channel<DictationSession> _final = Channel.CreateUnbounded<DictationSession>();
+    private sealed record Work(DictationSession Session, DictationSegment Segment);
+    private readonly Channel<Work> _jobs = Channel.CreateUnbounded<Work>(new UnboundedChannelOptions
+    {
+        SingleReader = true,
+        SingleWriter = false,
+        AllowSynchronousContinuations = false
+    });
     private readonly CancellationTokenSource _lifetime = new();
     private Task? _loop;
-    private int _liveDepth;
-    private int _finalDepth;
-    public int LiveQueueDepth => Volatile.Read(ref _liveDepth);
-    public int FinalizationQueueDepth => Volatile.Read(ref _finalDepth);
+    private int _depth;
+    public int QueueDepth => Volatile.Read(ref _depth);
     public event EventHandler<DictationSession>? TranscriptChanged;
     public event EventHandler<DictationSession>? SessionCompleted;
 
     public void Start() => _loop ??= Task.Run(() => RunAsync(_lifetime.Token));
-    public void SignalLive(DictationSession session) { if (_live.Writer.TryWrite(session)) Interlocked.Increment(ref _liveDepth); }
-    public void Finalize(DictationSession session) { if (_final.Writer.TryWrite(session)) Interlocked.Increment(ref _finalDepth); }
 
-    private async Task RunAsync(CancellationToken cancellationToken)
+    public void Enqueue(DictationSession session, IEnumerable<DictationSegment> segments)
     {
-        while (!cancellationToken.IsCancellationRequested)
+        foreach (DictationSegment segment in segments)
         {
-            while (_live.Reader.TryRead(out DictationSession? live))
-            {
-                Interlocked.Decrement(ref _liveDepth);
-                if (live.Status == Core.Models.DictationStatus.Recording && live.Ready)
-                {
-                    TryDecode(live);
-                    TranscriptChanged?.Invoke(this, live);
-                }
-            }
-
-            if (_final.Reader.TryRead(out DictationSession? final))
-            {
-                Interlocked.Decrement(ref _finalDepth);
-                try
-                {
-                    int guard = 0;
-                    while (final.Ready)
-                    {
-                        TryDecode(final);
-                        DrainLiveQueue();
-                        if (++guard > 10000) throw new InvalidOperationException("ASR finalization exceeded its decode guard.");
-                    }
-                    final.Complete(final.CurrentResult);
-                    SessionCompleted?.Invoke(this, final);
-                }
-                catch (Exception ex) { final.Fault(); LogSessionFault(logger, ex, final.Id); SessionCompleted?.Invoke(this, final); }
-                finally { final.Dispose(); }
-                continue;
-            }
-
-            Task liveReady = _live.Reader.WaitToReadAsync(cancellationToken).AsTask();
-            Task finalReady = _final.Reader.WaitToReadAsync(cancellationToken).AsTask();
-            await Task.WhenAny(liveReady, finalReady).ConfigureAwait(false);
+            if (_jobs.Writer.TryWrite(new(session, segment))) Interlocked.Increment(ref _depth);
         }
     }
 
-    private static void TryDecode(DictationSession session) => session.Decode();
-
-    private void DrainLiveQueue()
+    public void Finalize(DictationSession session, IEnumerable<DictationSegment> tailSegments)
     {
-        while (_live.Reader.TryRead(out DictationSession? session))
+        Enqueue(session, tailSegments);
+        if (session.TryCompleteWithoutPending()) SessionCompleted?.Invoke(this, session);
+    }
+
+    private async Task RunAsync(CancellationToken cancellationToken)
+    {
+        try
         {
-            Interlocked.Decrement(ref _liveDepth);
-            if (session.Status == Core.Models.DictationStatus.Recording && session.Ready)
+            await foreach (Work work in _jobs.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                TryDecode(session);
-                TranscriptChanged?.Invoke(this, session);
+                Interlocked.Decrement(ref _depth);
+                try
+                {
+                    IReadOnlyList<float[]> slices = work.Session.GetDecodeSlices(work.Segment);
+                    string text = string.Join(' ', slices.Select(work.Session.TranscribeForCoordinator).Where(x => !string.IsNullOrWhiteSpace(x)));
+                    SegmentCompletion completion = work.Session.CompleteSegment(work.Segment, text);
+                    if (completion is SegmentCompletion.TranscriptChanged or SegmentCompletion.SessionCompleted)
+                        TranscriptChanged?.Invoke(this, work.Session);
+                    if (completion == SegmentCompletion.SessionCompleted) SessionCompleted?.Invoke(this, work.Session);
+                }
+                catch (Exception ex)
+                {
+                    work.Session.Fault();
+                    LogSessionFault(logger, ex, work.Session.Id);
+                    SessionCompleted?.Invoke(this, work.Session);
+                }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     public async ValueTask DisposeAsync()
     {
         _lifetime.Cancel();
-        _live.Writer.TryComplete(); _final.Writer.TryComplete();
+        _jobs.Writer.TryComplete();
         if (_loop is not null) try { await _loop.ConfigureAwait(false); } catch (OperationCanceledException) { }
         _lifetime.Dispose();
     }
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "Session {SessionId} failed during ASR decode.")]
+    [LoggerMessage(Level = LogLevel.Error, Message = "Session {SessionId} failed during Parakeet segment decoding.")]
     private static partial void LogSessionFault(ILogger logger, Exception exception, string sessionId);
 }

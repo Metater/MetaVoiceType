@@ -1,17 +1,18 @@
 # Models
 
-## Nemotron dictation
+## Parakeet dictation
 
-The bundled `model-catalog.json` identifies NVIDIA Nemotron 3.5 ASR Streaming 0.6B, the official sherpa-onnx int8 archive, expected extraction directory, four required files, published SHA-256, byte estimate, OpenMDW-1.1 license URL, and documented language tiers. It deliberately contains no CPU/GPU state.
+`model-catalog.json` schema 2 contains generic dictation, VAD, and runtime artifacts. It is validated with `System.Text.Json` at startup and contains no acceleration/provider state.
 
-The download is written to `.part`, checked against SHA-256 `c6bf5e0df765f9d5b43bc9e0536d4b4b3e7d40bdf5ecf13e45f134c51c05ae3a`, safely extracted, validated, and committed. Nemotron defaults to `auto`; forced dictation values use the official locale identifiers such as `es-ES`, `ru-RU`, and `uk-UA`.
+| ID | Capability | Bytes | SHA-256 |
+|---|---|---:|---|
+| `parakeet-v2` | English, INT8 | 482,468,385 | `157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad` |
+| `parakeet-v3` | 25-language automatic detection, INT8 | 487,170,055 | `5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf` |
+| `silero-vad` | Local speech segmentation | 643,854 | `9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6` |
+| `sherpa-cuda-12` | Sherpa 1.13.5 CUDA 12/cuDNN 9 runtime | 375,615,135 | `2d35c894f1ec4a3b6bed9aaa2b5895394d6afa85c5245a3fd071c8f3d3cae893` |
 
-The V1 runtime uses sherpa-onnx's supported Windows CPU NuGet runtime. A clean supported Windows CUDA NuGet route was not available, so no handwritten CUDA/native integration was added.
+Both Parakeet entries require `encoder.int8.onnx`, `decoder.int8.onnx`, `joiner.int8.onnx`, and `tokens.txt`. V2 and v3 are CC-BY-4.0. V3 languages are Bulgarian, Croatian, Czech, Danish, Dutch, English, Estonian, Finnish, French, German, Greek, Hungarian, Italian, Latvian, Lithuanian, Maltese, Polish, Portuguese, Romanian, Slovak, Slovenian, Spanish, Swedish, Russian, and Ukrainian.
 
 ## Vosk commands
 
-`voice-command-languages.json` contains exactly 30 selectable language models, archive URLs, verified current archive sizes, model names, licenses, six defaults, and grammar mode. English (US) is the default. All 30 URLs returned HTTP 200 during V1 verification.
-
-The official Vosk C# 0.3.38 binding marshals runtime grammar through the Windows ANSI string path. Consequently, ASCII command sets use restricted grammar; non-ASCII sets use the publisher model's normal decoder and then exact configured-phrase matching. This avoids custom native bindings and works independently of the Windows system locale. The Ukrainian full `vosk-model-uk-v3` uses that documented fallback because it has a precompiled HCLG graph and its phrases are non-ASCII.
-
-Vosk confidence values are intentionally ignored. Alternatives are considered in source order; no threshold, ranking, display, or logging decision uses confidence.
+`voice-command-languages.json` is a separate schema containing command-model identity, URLs, sizes, licenses, grammar behavior, and six default phrases. It exposes exactly twelve V1 languages and defaults to English (US). ASCII phrase sets use restricted grammar. Non-ASCII sets use normal decoding followed by exact configured-phrase matching because the official Windows binding cannot safely marshal Unicode runtime grammar. Confidence never influences acceptance, ordering, logging, or UI.

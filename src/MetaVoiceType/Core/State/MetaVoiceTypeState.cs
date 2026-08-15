@@ -13,5 +13,12 @@ public partial class MetaVoiceTypeState : ObservableObject
     [ObservableProperty] public partial double AudioLevel { get; set; }
     [ObservableProperty] public partial DateTimeOffset? RecordingStartedAt { get; set; }
     [ObservableProperty] public partial string Acceleration { get; set; } = "Not installed";
+    [ObservableProperty] public partial string EngineLabel { get; set; } = "Dictation model not installed";
+    [ObservableProperty] public partial string? ProviderFallbackReason { get; set; }
+    [ObservableProperty] public partial string SelectedVoiceLanguageId { get; set; } = "en-us";
+    [ObservableProperty] public partial string? ActiveVoiceLanguageId { get; set; }
+    [ObservableProperty] public partial string VoiceModelState { get; set; } = "Not installed";
+    [ObservableProperty] public partial string DictationModelState { get; set; } = "Not installed";
+    [ObservableProperty] public partial string TransientFeedback { get; set; } = "";
     public System.Collections.ObjectModel.ObservableCollection<TranscriptRecord> History { get; } = [];
 }

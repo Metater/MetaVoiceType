@@ -4,7 +4,6 @@
     <AssemblyName>MetaVoiceType</AssemblyName>
     <RootNamespace>MetaVoiceType</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.0.0</Version>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
     <PublishSingleFile>false</PublishSingleFile>
     <PublishTrimmed>false</PublishTrimmed>
@@ -21,6 +20,8 @@
     <PackageReference Include="NAudio" />
     <PackageReference Include="Vosk" />
     <PackageReference Include="org.k2fsa.sherpa.onnx" />
+    <PackageReference Include="NtvLibs.cuda12.cublas.runtime.win-x64" />
+    <PackageReference Include="NtvLibs.cuDNN.cuda12.runtime.win-x64" />
     <PackageReference Include="SharpHook" />
     <PackageReference Include="TextCopy" />
     <PackageReference Include="Serilog.Extensions.Hosting" />

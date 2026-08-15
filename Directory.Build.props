@@ -8,5 +8,6 @@
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <Deterministic>true</Deterministic>
     <DebugType>embedded</DebugType>
+    <Version>1.1.0</Version>
   </PropertyGroup>
 </Project>

@@ -1,53 +1,40 @@
 # MetaVoiceType
 
-MetaVoiceType is a local-first Windows dictation app. Say a configurable command to start recording, dictate naturally, then say another command to copy or paste the finished transcript. Dictation and command recognition run on your PC; microphone audio and transcript text are not sent to a MetaVoiceType service.
+MetaVoiceType is a local-first Windows dictation app. Vosk listens locally for configurable voice commands; NVIDIA Parakeet transcribes only while a recording is active. Command language and dictation language are intentionally independent.
 
-## Requirements
+## Windows V1
 
-- Windows 10 or Windows 11, x64
-- A working Windows capture device
-- About 1 GB free for the app, the default command model, and Nemotron
-- Internet access only when downloading models or checking for app updates
+- Windows 10/11 x64 and a working capture device
+- Self-contained installer; no separate .NET or CUDA Toolkit installation
+- Automatic dictation: multilingual Parakeet TDT 0.6B v3
+- English dictation: Parakeet TDT 0.6B v2
+- NVIDIA CUDA 12/cuDNN 9 preferred when a compatible GPU and the verified Sherpa runtime are available; automatic CPU fallback otherwise
+- About 6 GB of free space recommended for setup, bundled GPU libraries, and both optional dictation models
+- Network access only for model downloads and optional update checks
 
-The V1 installer is self-contained and does not require a separately installed .NET runtime. Nemotron runs through the supported sherpa-onnx CPU NuGet runtime. NVIDIA CUDA was evaluated, but no clean supported Windows CUDA NuGet path was available for this model/runtime combination; MetaVoiceType therefore falls back to CPU and reports the active mode in Settings.
+Run `artifacts/releases/MetaVoiceType-win-Setup.exe`, then complete the seven setup steps. English (US) is the default Vosk command language and Automatic is the default Parakeet mode. Continue is disabled until each selected model has actually initialized.
 
-## Install and get started
+The six built-in English phrases are Start Recording, Stop Recording, Paste Here, Cancel Recording, Cancel Paste, and Copy Recording to Clipboard. Phrases are editable per Vosk language. V1 exposes twelve command languages: English (US), Russian, French, German, Spanish, Portuguese (Brazil), Italian, Dutch, Ukrainian, Swedish, Czech, and Polish.
 
-1. Run `MetaVoiceType-Setup.exe` from the release artifacts.
-2. Choose a voice-command language and download its Vosk model.
-3. Download the verified Nemotron model (about 475 MB).
-4. Choose a microphone and whether MetaVoiceType should start with Windows.
-5. Finish onboarding, then say **start recording** or press **Ctrl+Space**.
+Custom commands can launch a program, run PowerShell or Command Prompt text, or send a keyboard shortcut. Each belongs to one Vosk command language. The global recording shortcut defaults to `Ctrl+Space` and can be changed without restarting. Optional Discord auto-mute uses Discord's official local RPC and clearly reports when authorization is unavailable.
 
-The default English commands are:
-
-- Start Recording
-- Stop Recording
-- Paste Here
-- Cancel Recording
-- Cancel Paste
-- Copy Recording to Clipboard
-
-All six phrases are editable per voice-command language. Reset affects only the currently selected language. Vosk voice-command language and Nemotron dictation language are independent: changing one never restricts the other.
-
-Closing the window leaves command listening active in the system tray. Use **Exit MetaVoiceType** from the tray menu to stop the app.
+Closing the window keeps the local command listener in the tray. Use **Exit MetaVoiceType** from the tray menu to stop it.
 
 ## Privacy and recovery
 
-MetaVoiceType uses one microphone capture pipeline. Vosk receives the live stream while the app is running; Nemotron receives audio only during an active dictation. During dictation, raw PCM is written to a recovery area. The PCM is deleted only after the transcript is atomically stored in history. If the app or PC stops unexpectedly, MetaVoiceType detects and finalizes the interrupted recording on the next launch. History retains the newest 100 items.
+No MetaVoiceType service receives microphone audio or transcripts. During a recording, PCM is retained only in the local recovery directory until history is committed atomically. Interrupted recordings are recovered on the next launch. History retains the newest 100 exact transcripts.
 
-See [Privacy](docs/PRIVACY.md) and [Models](docs/MODELS.md) for details.
+See [Privacy](docs/PRIVACY.md), [Models](docs/MODELS.md), and [Architecture](docs/ARCHITECTURE.md).
 
-## Build from source
+## Build and package
 
-Install the .NET 10 SDK on Windows, then run:
+Install the .NET 10 SDK on Windows:
 
 ```powershell
 dotnet restore MetaVoiceType.slnx
 dotnet test MetaVoiceType.slnx -c Release
-dotnet publish src/MetaVoiceType/MetaVoiceType.csproj -c Release -r win-x64 --self-contained true -o artifacts/publish
+dotnet tool install --global vpk --version 1.2.0
+./scripts/package.ps1
 ```
 
-To create the installer, install `vpk` 1.2.0 and run `scripts/package.ps1`. Diagnostic options include `--self-test`, `--list-audio-devices`, `--diagnostics`, `--force-cpu`, `--reset-onboarding`, `--install-models`, and the audio/stress options documented in [Testing](docs/TESTING.md).
-
-Architecture, dependency, test, and release details are in the [`docs`](docs) folder and [REPORT-V1.md](REPORT-V1.md).
+`Directory.Build.props` is the single version source. A push to `main` creates a GitHub release only when that version does not already have a `vX.Y.Z` tag. See [Testing](docs/TESTING.md) and [REPORT-V1-REVIEW.md](REPORT-V1-REVIEW.md).

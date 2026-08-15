@@ -13,32 +13,35 @@ using NAudio.Wave.SampleProviders;
 namespace MetaVoiceType.Diagnostics;
 
 public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelDownloadService downloads, VoskCommandRecognizer vosk,
-    PasteCoordinator paste, RecoveryWriter recovery, AppPaths paths, ILoggerFactory loggerFactory, ILogger<DiagnosticRunner> logger)
+    PasteCoordinator paste, RecoveryWriter recovery, AppPaths paths, SherpaRuntimeBootstrapper runtime,
+    ILoggerFactory loggerFactory, ILogger<DiagnosticRunner> logger)
 {
     public async Task<int> RunAsync(StartupOptions options, CancellationToken cancellationToken = default)
     {
         IReadOnlyList<AudioDevice> devices = audio.EnumerateDevices();
         foreach (AudioDevice device in devices)
         {
-            string line = $"{(device.IsDefault ? "*" : " ")} {device.Name} [{device.Id}]";
-            Console.WriteLine(line);
+            Console.WriteLine($"{(device.IsDefault ? "*" : " ")} {device.Name} [{device.Id}]");
             LogAudioDevice(logger, device.Name, device.IsDefault);
         }
-        ModelCatalog models = ModelCatalog.LoadBundled();
+        ModelCatalog catalog = ModelCatalog.LoadBundled();
         VoiceCommandCatalog commands = VoiceCommandCatalog.LoadBundled();
         VoiceCommandLanguage commandLanguage = commands.Get(options.CommandLanguage);
-        IReadOnlyList<string> supportedLanguages = models.Nemotron.Languages.TranscriptionReady
-            .Concat(models.Nemotron.Languages.BroadCoverage).Concat(models.Nemotron.Languages.AdaptationReady).ToArray();
-        if (options.DictationLanguage != "auto" && !supportedLanguages.Contains(options.DictationLanguage, StringComparer.OrdinalIgnoreCase))
-            throw new ArgumentException($"Unsupported Nemotron diagnostic language '{options.DictationLanguage}'.");
-        if (options.InstallModels) await InstallModelsAsync(models, commandLanguage, cancellationToken).ConfigureAwait(false);
+        string modelId = options.DictationLanguage.Equals("en", StringComparison.OrdinalIgnoreCase) || options.DictationLanguage.Equals("english", StringComparison.OrdinalIgnoreCase)
+            ? "parakeet-v2" : "parakeet-v3";
+        ModelArtifact model = catalog.Get(modelId);
+        ModelArtifact vad = catalog.Get("silero-vad");
+        if (options.InstallModels) await InstallModelsAsync(catalog, model, commandLanguage, cancellationToken).ConfigureAwait(false);
+
+        string modelPath = Path.Combine(paths.DictationModels, model.ExpectedDirectory);
+        string vadDirectory = Path.Combine(paths.DictationModels, vad.ExpectedDirectory);
+        bool dictationInstalled = IsInstalled(modelPath, model) && IsInstalled(vadDirectory, vad);
+
         if (options.RecoveryCrashSeconds > 0)
         {
-            string modelPath = Path.Combine(paths.NemotronModels, models.Nemotron.ExtractedDirectory);
-            if (!models.Nemotron.RequiredFiles.All(file => File.Exists(Path.Combine(modelPath, file))))
-                throw new InvalidOperationException("Install Nemotron before creating a recovery crash fixture.");
-            using var backend = new SherpaNemotronBackend(modelPath, models.Nemotron, loggerFactory.CreateLogger<SherpaNemotronBackend>());
-            using var session = new DictationSession(options.DictationLanguage, backend.CreateStream(options.DictationLanguage));
+            if (!dictationInstalled) throw new InvalidOperationException("Install the selected Parakeet model and Silero VAD before creating a recovery fixture.");
+            using var backend = new SherpaParakeetBackend(modelPath, model, runtime, loggerFactory.CreateLogger<SherpaParakeetBackend>());
+            using var session = new DictationSession(options.DictationLanguage, 0, backend, Path.Combine(vadDirectory, vad.Files.Model!));
             recovery.Start();
             void CaptureRecovery(object? sender, AudioFrame frame) { session.Accept(frame); recovery.Enqueue(session, frame); }
             audio.FrameReady += CaptureRecovery;
@@ -47,6 +50,7 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
             Environment.FailFast("Intentional MetaVoiceType recovery diagnostic crash.");
             return 1;
         }
+
         if (options.PasteText is not null)
         {
             var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -59,42 +63,33 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
         }
         if (!options.SelfTest && !options.InstallModels && options.AudioFile is null && options.StressMinutes == 0) return 0;
 
-        LogCatalogs(logger, commands.Languages.Count, models.Nemotron.Id);
+        LogCatalogs(logger, commands.Languages.Count, model.Id);
         if (devices.Count == 0) throw new InvalidOperationException("No active Windows capture device was found.");
-
         foreach (AudioDevice device in devices)
         {
             long before = audio.Metrics.FramesCaptured;
-            try
-            {
-                await audio.StartAsync(device.Id, cancellationToken).ConfigureAwait(false);
-                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
-            }
+            try { await audio.StartAsync(device.Id, cancellationToken).ConfigureAwait(false); await Task.Delay(500, cancellationToken).ConfigureAwait(false); }
             finally { await audio.StopAsync(cancellationToken).ConfigureAwait(false); }
             if (audio.Metrics.FramesCaptured == before) throw new InvalidOperationException($"Audio device '{device.Name}' produced no frames.");
         }
         AudioMetrics metrics = audio.Metrics;
-        if (metrics.FramesCaptured == 0) throw new InvalidOperationException("The default microphone opened but produced no audio frames.");
         if (metrics.LostFrames != 0) throw new InvalidOperationException($"Audio frames were lost during capture: {metrics.LostFrames}.");
 
-        string dictationPath = Path.Combine(paths.NemotronModels, models.Nemotron.ExtractedDirectory);
-        bool dictationInstalled = models.Nemotron.RequiredFiles.All(file => File.Exists(Path.Combine(dictationPath, file)));
         AudioFrame[]? testFrames = options.AudioFile is null ? null : ReadAudio(options.AudioFile);
         if (dictationInstalled)
         {
-            using var backend = new SherpaNemotronBackend(dictationPath, models.Nemotron, loggerFactory.CreateLogger<SherpaNemotronBackend>());
-            using IAsrChannel channel = backend.CreateStream(options.DictationLanguage);
-            if (testFrames is not null) foreach (AudioFrame frame in testFrames) channel.Accept(frame.Samples);
-            channel.Accept(new float[16_000]);
-            channel.Finish();
-            while (channel.IsReady()) channel.Decode();
+            using var backend = new SherpaParakeetBackend(modelPath, model, runtime, loggerFactory.CreateLogger<SherpaParakeetBackend>());
+            Console.WriteLine($"ASR: {backend.Status.CompactLabel}; provider={backend.Status.Provider}; GPU={backend.Status.GpuName ?? "n/a"}; runtime={backend.Status.RuntimeVersion}");
+            if (backend.Status.FallbackReason is not null) Console.WriteLine("Provider fallback: " + backend.Status.FallbackReason);
             if (testFrames is not null)
             {
-                Console.WriteLine("Nemotron: " + channel.CurrentText);
-                if (string.IsNullOrWhiteSpace(channel.CurrentText)) throw new InvalidOperationException("Nemotron produced no text for the supplied audio file.");
+                string text = backend.Transcribe(testFrames.SelectMany(x => x.Samples).ToArray());
+                Console.WriteLine($"{backend.Status.ModelDisplayName}: {text}");
+                if (string.IsNullOrWhiteSpace(text)) throw new InvalidOperationException("Parakeet produced no text for the supplied audio file.");
             }
         }
-        else if (testFrames is not null) throw new InvalidOperationException("Install Nemotron before testing an audio file.");
+        else if (testFrames is not null) throw new InvalidOperationException("Install the selected Parakeet model and Silero VAD before testing audio.");
+
         string commandPath = Path.Combine(paths.VoskModels, commandLanguage.ModelName);
         if (Directory.Exists(commandPath))
         {
@@ -107,28 +102,28 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
                 foreach (AudioFrame frame in testFrames) vosk.Accept(frame);
                 for (int i = 0; i < 100; i++) vosk.Accept(Pcm16Converter.Convert(new byte[640]));
                 Console.WriteLine("Vosk command: " + (recognized?.Phrase ?? "<none>"));
-                if (recognized is null) throw new InvalidOperationException("Vosk did not recognize a configured command in the supplied audio file.");
+                if (recognized is null) throw new InvalidOperationException("Vosk did not recognize a configured command.");
             }
         }
-        else if (options.TestCommand) throw new InvalidOperationException($"Install the {commandLanguage.DisplayName} Vosk model before testing its command audio.");
+        else if (options.TestCommand) throw new InvalidOperationException($"Install the {commandLanguage.DisplayName} Vosk model first.");
         if (options.StressMinutes > 0)
         {
             if (!dictationInstalled || !Directory.Exists(commandPath)) throw new InvalidOperationException("Install both selected models before a stress run.");
-            await RunStressAsync(dictationPath, models.Nemotron, options, cancellationToken).ConfigureAwait(false);
+            await RunStressAsync(modelPath, model, Path.Combine(vadDirectory, vad.Files.Model!), options, cancellationToken).ConfigureAwait(false);
         }
         LogSelfTest(logger, metrics.FramesCaptured, metrics.MaxQueueDepth, metrics.CallbackMilliseconds, dictationInstalled);
         return 0;
     }
 
-    private async Task RunStressAsync(string modelPath, DictationModel model, StartupOptions options, CancellationToken cancellationToken)
+    private async Task RunStressAsync(string modelPath, ModelArtifact model, string vadPath, StartupOptions options, CancellationToken cancellationToken)
     {
-        using var backend = new SherpaNemotronBackend(modelPath, model, loggerFactory.CreateLogger<SherpaNemotronBackend>());
-        using var session = new DictationSession(options.DictationLanguage, backend.CreateStream(options.DictationLanguage));
+        using var backend = new SherpaParakeetBackend(modelPath, model, runtime, loggerFactory.CreateLogger<SherpaParakeetBackend>());
+        using var session = new DictationSession(options.DictationLanguage, 0, backend, vadPath);
         await using var coordinator = new DecodeCoordinator(loggerFactory.CreateLogger<DecodeCoordinator>());
         coordinator.Start();
         int commandTriggers = 0;
         vosk.CommandRecognized += (_, _) => Interlocked.Increment(ref commandTriggers);
-        void OnFrame(object? sender, AudioFrame frame) { vosk.Accept(frame); session.Accept(frame); coordinator.SignalLive(session); }
+        void OnFrame(object? sender, AudioFrame frame) { vosk.Accept(frame); coordinator.Enqueue(session, session.Accept(frame)); }
         audio.FrameReady += OnFrame;
         long startedMemory = Environment.WorkingSet;
         try
@@ -138,40 +133,34 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
             {
                 await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
                 AudioMetrics current = audio.Metrics;
-                Console.WriteLine($"Stress {minute}/{options.StressMinutes} min: frames={current.FramesCaptured}, queue={current.QueueDepth}, maxQueue={current.MaxQueueDepth}, lost={current.LostFrames}");
+                Console.WriteLine($"Stress {minute}/{options.StressMinutes}: frames={current.FramesCaptured}, queue={current.QueueDepth}, maxQueue={current.MaxQueueDepth}, lost={current.LostFrames}, asrQueue={coordinator.QueueDepth}");
             }
         }
-        finally
-        {
-            audio.FrameReady -= OnFrame;
-            await audio.StopAsync(cancellationToken).ConfigureAwait(false);
-        }
-        session.Stop(false, false);
-        coordinator.Finalize(session);
-        using var finalizationTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        finalizationTimeout.CancelAfter(TimeSpan.FromSeconds(60));
-        while (session.Status == DictationStatus.Finalizing) await Task.Delay(20, finalizationTimeout.Token).ConfigureAwait(false);
-        AudioMetrics metrics = audio.Metrics;
-        long memoryDelta = Environment.WorkingSet - startedMemory;
-        Console.WriteLine($"Stress complete: status={session.Status}, finalizationMs={session.FinalizationMilliseconds:F1}, maxQueue={metrics.MaxQueueDepth}, lost={metrics.LostFrames}, commandTriggers={commandTriggers}, memoryDeltaBytes={memoryDelta}");
-        if (metrics.LostFrames != 0 || metrics.QueueDepth != 0) throw new InvalidOperationException("The long-run audio queue did not remain lossless and drained.");
+        finally { audio.FrameReady -= OnFrame; await audio.StopAsync(cancellationToken).ConfigureAwait(false); }
+        coordinator.Finalize(session, session.Stop(false, false));
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(TimeSpan.FromMinutes(5));
+        while (session.Status == DictationStatus.Finalizing) await Task.Delay(20, timeout.Token).ConfigureAwait(false);
+        AudioMetrics final = audio.Metrics;
+        Console.WriteLine($"Stress complete: provider={backend.Status.Provider}, status={session.Status}, finalizationMs={session.FinalizationMilliseconds:F1}, lost={final.LostFrames}, commandTriggers={commandTriggers}, memoryDeltaBytes={Environment.WorkingSet - startedMemory}");
+        if (final.LostFrames != 0 || final.QueueDepth != 0 || coordinator.QueueDepth != 0) throw new InvalidOperationException("A real-time queue did not drain losslessly.");
     }
 
-    private async Task InstallModelsAsync(ModelCatalog catalog, VoiceCommandLanguage commandLanguage, CancellationToken cancellationToken)
+    private async Task InstallModelsAsync(ModelCatalog catalog, ModelArtifact dictation, VoiceCommandLanguage language, CancellationToken cancellationToken)
     {
-        var commandRequest = new ModelInstallRequest(commandLanguage.ArchiveUrl, commandLanguage.ArchiveType, commandLanguage.ModelName, paths.VoskModels, null,
-            commandLanguage.SizeBytes, ["am/final.mdl", "conf/mfcc.conf"]);
-        await downloads.InstallAsync(commandRequest, Progress("Vosk"), cancellationToken).ConfigureAwait(false);
-
-        DictationModel model = catalog.Nemotron;
-        var dictationRequest = new ModelInstallRequest(model.ArchiveUrl, model.ArchiveType, model.ExtractedDirectory, paths.NemotronModels,
-            model.ArchiveSha256, model.EstimatedDownloadBytes, model.RequiredFiles);
-        await downloads.InstallAsync(dictationRequest, Progress("Nemotron"), cancellationToken).ConfigureAwait(false);
+        await downloads.InstallAsync(new(language.ArchiveUrl, language.ArchiveType, language.ModelName, paths.VoskModels, null,
+            language.SizeBytes, ["am/final.mdl", "conf/mfcc.conf"]), Progress("Vosk"), cancellationToken).ConfigureAwait(false);
+        IEnumerable<ModelArtifact> artifacts = new[] { catalog.Get("silero-vad"), dictation };
+        if (!runtime.ForceCpu && runtime.ProbeNvidiaGpu() is not null) artifacts = new[] { catalog.Get("sherpa-cuda-12") }.Concat(artifacts);
+        foreach (ModelArtifact artifact in artifacts)
+        {
+            string root = artifact.Kind == ModelArtifactKinds.Runtime ? paths.RuntimeModels : paths.DictationModels;
+            await downloads.InstallAsync(artifact.ToInstallRequest(root), Progress(artifact.DisplayName), cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    private static Progress<ModelDownloadProgress> Progress(string name) => new(value =>
-        Console.WriteLine($"{name}: {value.Stage} {(value.Percentage is null ? "" : $"{value.Percentage:F1}%")}"));
-
+    private static bool IsInstalled(string directory, ModelArtifact artifact) => artifact.RequiredFiles.All(file => File.Exists(Path.Combine(directory, file.Replace('/', Path.DirectorySeparatorChar))));
+    private static Progress<ModelDownloadProgress> Progress(string name) => new(value => Console.WriteLine($"{name}: {value.Stage} {(value.Percentage is null ? "" : $"{value.Percentage:F1}%")}"));
     private static AudioFrame[] ReadAudio(string file)
     {
         using var reader = new AudioFileReader(file);

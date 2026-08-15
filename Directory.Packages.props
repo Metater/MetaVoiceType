@@ -12,7 +12,9 @@
     <PackageVersion Include="System.CommandLine" Version="2.0.10" />
     <PackageVersion Include="NAudio" Version="2.3.0" />
     <PackageVersion Include="Vosk" Version="0.3.38" />
-    <PackageVersion Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
+    <PackageVersion Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
+    <PackageVersion Include="NtvLibs.cuda12.cublas.runtime.win-x64" Version="12.8.1" />
+    <PackageVersion Include="NtvLibs.cuDNN.cuda12.runtime.win-x64" Version="9.8.0.87" />
     <PackageVersion Include="SharpHook" Version="7.1.3" />
     <PackageVersion Include="TextCopy" Version="6.2.1" />
     <PackageVersion Include="Serilog.Extensions.Hosting" Version="10.0.0" />

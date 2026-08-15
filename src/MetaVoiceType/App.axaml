@@ -2,29 +2,36 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="MetaVoiceType.App"
              RequestedThemeVariant="Dark">
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Dark">
+          <Color x:Key="CanvasColor">#0C0E14</Color><Color x:Key="SurfaceColor">#141720</Color><Color x:Key="SurfaceRaisedColor">#1A1E29</Color><Color x:Key="SurfaceHoverColor">#222735</Color><Color x:Key="BorderColor">#2A3040</Color>
+          <Color x:Key="TextColor">#F5F6FA</Color><Color x:Key="MutedTextColor">#9BA3B5</Color><Color x:Key="SubtleTextColor">#747D91</Color><Color x:Key="AccentColor">#8068FF</Color><Color x:Key="AccentHoverColor">#927EFF</Color><Color x:Key="AccentSoftColor">#27233F</Color><Color x:Key="AccentForegroundColor">#FFFFFF</Color>
+          <Color x:Key="SuccessColor">#55DB99</Color><Color x:Key="SuccessSoftColor">#172D26</Color><Color x:Key="WarningColor">#FFBA69</Color><Color x:Key="DangerColor">#FF607D</Color><Color x:Key="DangerSoftColor">#35FF607D</Color>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+          <Color x:Key="CanvasColor">#F5F6FA</Color><Color x:Key="SurfaceColor">#FFFFFF</Color><Color x:Key="SurfaceRaisedColor">#FAFAFD</Color><Color x:Key="SurfaceHoverColor">#F0EFFA</Color><Color x:Key="BorderColor">#DDE1EA</Color>
+          <Color x:Key="TextColor">#191B24</Color><Color x:Key="MutedTextColor">#5D6575</Color><Color x:Key="SubtleTextColor">#7C8493</Color><Color x:Key="AccentColor">#6550E8</Color><Color x:Key="AccentHoverColor">#5742D6</Color><Color x:Key="AccentSoftColor">#ECE9FF</Color><Color x:Key="AccentForegroundColor">#FFFFFF</Color>
+          <Color x:Key="SuccessColor">#18885A</Color><Color x:Key="SuccessSoftColor">#E4F6ED</Color><Color x:Key="WarningColor">#A85D00</Color><Color x:Key="DangerColor">#C93554</Color><Color x:Key="DangerSoftColor">#18C93554</Color>
+        </ResourceDictionary>
+      </ResourceDictionary.ThemeDictionaries>
+      <SolidColorBrush x:Key="CanvasBrush" Color="{DynamicResource CanvasColor}"/><SolidColorBrush x:Key="SurfaceBrush" Color="{DynamicResource SurfaceColor}"/><SolidColorBrush x:Key="SurfaceRaisedBrush" Color="{DynamicResource SurfaceRaisedColor}"/><SolidColorBrush x:Key="SurfaceHoverBrush" Color="{DynamicResource SurfaceHoverColor}"/><SolidColorBrush x:Key="BorderBrush" Color="{DynamicResource BorderColor}"/>
+      <SolidColorBrush x:Key="TextBrush" Color="{DynamicResource TextColor}"/><SolidColorBrush x:Key="MutedTextBrush" Color="{DynamicResource MutedTextColor}"/><SolidColorBrush x:Key="SubtleTextBrush" Color="{DynamicResource SubtleTextColor}"/><SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource AccentColor}"/><SolidColorBrush x:Key="AccentHoverBrush" Color="{DynamicResource AccentHoverColor}"/><SolidColorBrush x:Key="AccentSoftBrush" Color="{DynamicResource AccentSoftColor}"/><SolidColorBrush x:Key="AccentForegroundBrush" Color="{DynamicResource AccentForegroundColor}"/>
+      <SolidColorBrush x:Key="SuccessBrush" Color="{DynamicResource SuccessColor}"/><SolidColorBrush x:Key="SuccessSoftBrush" Color="{DynamicResource SuccessSoftColor}"/><SolidColorBrush x:Key="WarningBrush" Color="{DynamicResource WarningColor}"/><SolidColorBrush x:Key="DangerBrush" Color="{DynamicResource DangerColor}"/><SolidColorBrush x:Key="DangerSoftBrush" Color="{DynamicResource DangerSoftColor}"/>
+    </ResourceDictionary>
+  </Application.Resources>
   <Application.Styles>
-    <FluentTheme />
-    <Style Selector="Window"><Setter Property="FontFamily" Value="avares://Avalonia.Fonts.Inter/Assets#Inter" /></Style>
-    <Style Selector="Button.primary">
-      <Setter Property="Background" Value="#7C5CFC"/><Setter Property="Foreground" Value="White"/>
-      <Setter Property="CornerRadius" Value="10"/><Setter Property="Padding" Value="18,11"/>
-    </Style>
-    <Style Selector="Button.ghost"><Setter Property="Background" Value="Transparent"/><Setter Property="CornerRadius" Value="9"/></Style>
-    <Style Selector="Border.card"><Setter Property="Background" Value="#161922"/><Setter Property="CornerRadius" Value="16"/><Setter Property="Padding" Value="20"/></Style>
-    <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="#969CAD"/></Style>
-    <Style Selector="TextBlock.heading"><Setter Property="FontSize" Value="24"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+    <FluentTheme/>
+    <Style Selector="Window"><Setter Property="FontFamily" Value="avares://Avalonia.Fonts.Inter/Assets#Inter"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
+    <Style Selector="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
+    <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/></Style><Style Selector="TextBlock.subtle"><Setter Property="Foreground" Value="{DynamicResource SubtleTextBrush}"/></Style>
+    <Style Selector="TextBlock.heading"><Setter Property="FontSize" Value="25"/><Setter Property="FontWeight" Value="SemiBold"/></Style><Style Selector="TextBlock.section"><Setter Property="FontSize" Value="18"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
+    <Style Selector="Border.card"><Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="16"/><Setter Property="Padding" Value="20"/></Style>
+    <Style Selector="Border.soft"><Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}"/><Setter Property="CornerRadius" Value="11"/><Setter Property="Padding" Value="13"/></Style>
+    <Style Selector="Button"><Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="14,9"/></Style><Style Selector="Button.primary"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/><Setter Property="Foreground" Value="{DynamicResource AccentForegroundBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Style><Style Selector="Button.primary:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource AccentHoverBrush}"/></Style>
+    <Style Selector="Button.ghost"><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="10,8"/></Style><Style Selector="Button.ghost:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}"/></Style><Style Selector="Button.danger"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></Style>
+    <Style Selector="TextBox, ComboBox"><Setter Property="MinHeight" Value="38"/></Style><Style Selector="ProgressBar"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></Style>
   </Application.Styles>
-  <TrayIcon.Icons>
-    <TrayIcons>
-      <TrayIcon Icon="/UI/Assets/metavoicetype.ico" ToolTipText="MetaVoiceType — command listening active" Clicked="OpenFromTray">
-        <TrayIcon.Menu>
-          <NativeMenu>
-            <NativeMenuItem Header="Open MetaVoiceType" Click="OpenFromTray" />
-            <NativeMenuItemSeparator />
-            <NativeMenuItem Header="Exit MetaVoiceType" Click="ExitFromTray" />
-          </NativeMenu>
-        </TrayIcon.Menu>
-      </TrayIcon>
-    </TrayIcons>
-  </TrayIcon.Icons>
+  <TrayIcon.Icons><TrayIcons><TrayIcon Icon="/UI/Assets/metavoicetype.ico" ToolTipText="MetaVoiceType — command listening active" Clicked="OpenFromTray"><TrayIcon.Menu><NativeMenu><NativeMenuItem Header="Open MetaVoiceType" Click="OpenFromTray"/><NativeMenuItemSeparator/><NativeMenuItem Header="Exit MetaVoiceType" Click="ExitFromTray"/></NativeMenu></TrayIcon.Menu></TrayIcon></TrayIcons></TrayIcon.Icons>
 </Application>
