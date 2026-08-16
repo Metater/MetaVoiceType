@@ -9,7 +9,7 @@ public sealed record AsrRuntimeStatus(
     string RuntimeVersion,
     string? FallbackReason)
 {
-    public string CompactLabel => $"{ModelDisplayName} · {Acceleration}";
+    public string CompactLabel => $"{ModelDisplayName} on {Acceleration}";
 }
 
 public interface IAsrBackend : IDisposable

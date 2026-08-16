@@ -6,6 +6,7 @@
 - Recovery PCM exists below `%LOCALAPPDATA%\MetaVoiceType\Recovery` until corrected transcript history is committed, then is deleted. Interrupted segments remain for local recovery.
 - Logs contain lifecycle, provider, timing, queue, and error data—not transcript bodies or audio.
 - Settings and the newest 100 logical transcripts stay below `%LOCALAPPDATA%\MetaVoiceType` until removed by the user.
+- Transcript timestamps are stored canonically in UTC and converted to the current Windows time zone only for display. Whitespace-only results are never stored, copied, or pasted.
 - Word replacements run locally before display/history/copy/paste.
 - Recording-event and custom keyboard actions synthesize only the configured keys. MetaVoiceType does not inspect Discord or another target application's state.
 

@@ -13,12 +13,16 @@ public static class CustomCommandValidator
     {
         if (string.IsNullOrWhiteSpace(command.Id) || string.IsNullOrWhiteSpace(command.Name)) throw new InvalidDataException("Command name is required.");
         if (string.IsNullOrWhiteSpace(command.VoiceCommandLanguageId)) throw new InvalidDataException("Command language is required.");
-        string normalized = CommandPhraseValidator.Normalize(command.Phrase);
-        if (normalized.Length == 0 || normalized == "[unk]") throw new InvalidDataException("Command phrases cannot be blank or [unk].");
-        if (builtInPhrases.Any(x => CommandPhraseValidator.Normalize(x).Equals(normalized, StringComparison.OrdinalIgnoreCase)) ||
+        if (command.Aliases.Count == 0 && !string.IsNullOrWhiteSpace(command.Phrase)) command.Aliases.Add(command.Phrase);
+        else if (!string.IsNullOrWhiteSpace(command.Phrase) && command.Aliases.Count > 0 &&
+                 !command.Aliases[0].Equals(command.Phrase, StringComparison.OrdinalIgnoreCase)) command.Aliases[0] = command.Phrase;
+        CommandPhraseValidator.ValidateAliases(command.Aliases);
+        string[] normalized = command.Aliases.Select(CommandPhraseValidator.Normalize).ToArray();
+        if (builtInPhrases.Select(CommandPhraseValidator.Normalize).Intersect(normalized, StringComparer.OrdinalIgnoreCase).Any() ||
             otherCommands.Where(x => x.Id != command.Id && x.VoiceCommandLanguageId.Equals(command.VoiceCommandLanguageId, StringComparison.OrdinalIgnoreCase))
-                .Any(x => CommandPhraseValidator.Normalize(x.Phrase).Equals(normalized, StringComparison.OrdinalIgnoreCase)))
+                .SelectMany(x => x.Aliases).Select(CommandPhraseValidator.Normalize).Intersect(normalized, StringComparer.OrdinalIgnoreCase).Any())
             throw new InvalidDataException("This phrase is already used in the selected command language.");
+        command.Phrase = command.Aliases[0];
 
         switch (command.CommandType)
         {

@@ -69,7 +69,7 @@ public sealed partial class SherpaParakeetBackend : IAsrBackend
     }
 
     private void WarmUp() => Transcribe(new float[1600]);
-    private static string ShortName(string id) => id == "parakeet-v2" ? "Parakeet v2" : "Parakeet v3";
+    private static string ShortName(string id) => id == "parakeet-v2" ? "Parakeet V2" : "Parakeet V3";
     public void Dispose() => _recognizer.Dispose();
 
     [LoggerMessage(Level = LogLevel.Information, Message = "{Model} initialized with provider={Provider} (sherpa {SherpaVersion}).")]

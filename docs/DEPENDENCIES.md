@@ -10,6 +10,7 @@ Direct versions are centrally pinned in `Directory.Packages.props`.
 | Microsoft.Extensions.Hosting | 10.0.10 | Hosting and DI |
 | System.CommandLine | 2.0.10 | Diagnostics |
 | NAudio | 2.3.0 | WASAPI, cues, resampling |
+| FftSharp | 2.2.0 | Managed FFT and Hanning window for the shared speech spectrum |
 | Vosk | 0.3.38 | Offline command recognition |
 | org.k2fsa.sherpa.onnx | 1.13.5 | Managed Parakeet/VAD wrapper and CPU runtime |
 | NtvLibs CUDA 12 cuBLAS | 12.8.1 | NuGet-delivered Windows CUDA dependencies |

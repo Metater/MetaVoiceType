@@ -38,7 +38,7 @@ public sealed class CatalogAndCommandTests
         Assert.Equal("auto", v3.DefaultLanguage);
         Assert.Equal("CC-BY-4.0", v3.License);
         Assert.Equal("5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf", v3.ArchiveSha256);
-        Assert.Equal(487170055, v3.ArchiveBytes);
+        Assert.Equal(487170055, v3.EstimatedDownloadBytes);
         Assert.Equal(283097583, v3.AssetId);
         Assert.Equal("asr-models", v3.ReleaseTag);
         Assert.True(v3.Capabilities!.AutomaticLanguageDetection);

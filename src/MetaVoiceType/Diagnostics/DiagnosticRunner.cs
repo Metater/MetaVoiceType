@@ -13,7 +13,7 @@ using NAudio.Wave.SampleProviders;
 namespace MetaVoiceType.Diagnostics;
 
 public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelDownloadService downloads, VoskCommandRecognizer vosk,
-    PasteCoordinator paste, RecoveryWriter recovery, AppPaths paths, SherpaRuntimeBootstrapper runtime,
+    PasteCoordinator paste, RecoveryWriter recovery, AudioSpectrumService spectrum, AppPaths paths, SherpaRuntimeBootstrapper runtime,
     ILoggerFactory loggerFactory, ILogger<DiagnosticRunner> logger)
 {
     public async Task<int> RunAsync(StartupOptions options, CancellationToken cancellationToken = default)
@@ -123,8 +123,13 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
         coordinator.Start();
         recovery.Start();
         int commandTriggers = 0;
+        long voskFrames = 0, vadFrames = 0, recoveryFrames = 0;
+        long spectrumFrames = 0;
+        using IDisposable spectrumLease = spectrum.Acquire();
+        void OnSpectrum(object? sender, IReadOnlyList<double> frame) => Interlocked.Increment(ref spectrumFrames);
+        spectrum.FrameReady += OnSpectrum;
         vosk.CommandRecognized += (_, _) => Interlocked.Increment(ref commandTriggers);
-        void OnFrame(object? sender, AudioFrame frame) { vosk.Accept(frame); coordinator.Enqueue(session, session.Accept(frame)); recovery.Enqueue(session, frame); }
+        void OnFrame(object? sender, AudioFrame frame) { vosk.Accept(frame); Interlocked.Increment(ref voskFrames); coordinator.Enqueue(session, session.Accept(frame)); Interlocked.Increment(ref vadFrames); recovery.Enqueue(session, frame); Interlocked.Increment(ref recoveryFrames); }
         audio.FrameReady += OnFrame;
         long startedMemory = Environment.WorkingSet;
         try
@@ -137,7 +142,7 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
                 Console.WriteLine($"Stress {minute}/{options.StressMinutes}: captured={current.FramesCaptured}, dispatched={current.FramesDispatched}, dropped={current.FramesDropped}, captureQueue={current.QueueDepth}, captureHighWater={current.CaptureQueueHighWaterMark}, parakeetQueue={coordinator.QueueDepth}, parakeetHighWater={coordinator.MaxQueueDepth}, recoveryQueue={recovery.QueueDepth}, recoveryHighWater={recovery.MaxQueueDepth}, memoryBytes={Environment.WorkingSet}");
             }
         }
-        finally { audio.FrameReady -= OnFrame; await audio.StopAsync(cancellationToken).ConfigureAwait(false); }
+        finally { audio.FrameReady -= OnFrame; spectrum.FrameReady -= OnSpectrum; await audio.StopAsync(cancellationToken).ConfigureAwait(false); }
         coordinator.Finalize(session, session.Stop(false, false));
         await recovery.CloseAsync(session).WaitAsync(TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -145,8 +150,9 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
         while (session.Status == DictationStatus.Finalizing) await Task.Delay(20, timeout.Token).ConfigureAwait(false);
         AudioMetrics final = audio.Metrics;
         recovery.Delete(session.Id);
-        Console.WriteLine($"Stress complete: provider={backend.Status.Provider}, status={session.Status}, finalizationMs={session.FinalizationMilliseconds:F1}, FramesCaptured={final.FramesCaptured}, FramesDispatched={final.FramesDispatched}, FramesDropped={final.FramesDropped}, CaptureQueueHighWaterMark={final.CaptureQueueHighWaterMark}, ParakeetQueueHighWaterMark={coordinator.MaxQueueDepth}, RecoveryQueueHighWaterMark={recovery.MaxQueueDepth}, commandTriggers={commandTriggers}, memoryDeltaBytes={Environment.WorkingSet - startedMemory}");
-        if (final.FramesDropped != 0 || final.QueueDepth != 0 || coordinator.QueueDepth != 0 || recovery.QueueDepth != 0) throw new InvalidOperationException("A real-time queue did not drain losslessly.");
+        Console.WriteLine($"Stress complete: provider={backend.Status.Provider}, status={session.Status}, finalizationMs={session.FinalizationMilliseconds:F1}, FramesCaptured={final.FramesCaptured}, FramesDispatched={final.FramesDispatched}, FramesDropped={final.FramesDropped}, RecoveryFrames={recoveryFrames}, VoskFrames={voskFrames}, VadFrames={vadFrames}, SpectrumFrames={spectrumFrames}, CaptureQueueHighWaterMark={final.CaptureQueueHighWaterMark}, ParakeetQueueHighWaterMark={coordinator.MaxQueueDepth}, RecoveryQueueHighWaterMark={recovery.MaxQueueDepth}, commandTriggers={commandTriggers}, memoryDeltaBytes={Environment.WorkingSet - startedMemory}");
+        if (final.FramesDropped != 0 || final.QueueDepth != 0 || coordinator.QueueDepth != 0 || recovery.QueueDepth != 0 || spectrumFrames == 0)
+            throw new InvalidOperationException("A real-time queue or spectrum consumer did not drain losslessly.");
     }
 
     private async Task InstallModelsAsync(ModelCatalog catalog, ModelArtifact dictation, VoiceCommandLanguage language, CancellationToken cancellationToken)

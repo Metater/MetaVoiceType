@@ -2,17 +2,22 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:MetaVoiceType.UI.ViewModels"
         xmlns:material="using:Material.Icons.Avalonia"
+        xmlns:controls="using:MetaVoiceType.UI.Controls"
         x:Class="MetaVoiceType.UI.Views.PillWindow" x:DataType="vm:MainViewModel"
-        Width="420" Height="58" WindowDecorations="None" CanResize="False" ShowInTaskbar="False" ShowActivated="False"
-        Topmost="True" Background="Transparent" TransparencyLevelHint="Transparent">
-  <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="23" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="12,7" Margin="2" BoxShadow="0 8 22 0 #55000000">
+        Width="438" Height="66" WindowDecorations="None" CanResize="False" ShowInTaskbar="False" ShowActivated="False"
+        Topmost="True" Background="#00000000" TransparencyLevelHint="Transparent" ExtendClientAreaToDecorationsHint="True">
+  <Panel Background="#00000000">
+  <Border Background="{DynamicResource SurfaceBrush}" CornerRadius="25" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="12,7" Margin="5" BoxShadow="0 8 22 0 #55000000">
     <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="6">
-      <Border Width="16" Height="16" CornerRadius="8" Background="{DynamicResource DangerSoftBrush}" VerticalAlignment="Center"><Ellipse Width="9" Height="9" Fill="{DynamicResource DangerBrush}" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
-      <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="Recording" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="{Binding ElapsedText}" FontSize="11" Classes="muted"/></StackPanel>
-      <Button Grid.Column="3" Classes="ghost" Command="{Binding CopyCommand}" ToolTip.Tip="Copy current transcript without stopping"><material:MaterialIcon Kind="ContentCopy" Width="18"/></Button>
-      <Button Grid.Column="4" Classes="ghost" Command="{Binding PasteCommand}" ToolTip.Tip="Paste Recording"><material:MaterialIcon Kind="ContentPaste" Width="18"/></Button>
-      <Button Grid.Column="5" Classes="ghost" Command="{Binding StopRecordingCommand}" ToolTip.Tip="Stop recording"><material:MaterialIcon Kind="StopCircleOutline" Width="19"/></Button>
-      <Button Grid.Column="6" Classes="ghost danger" Command="{Binding CancelRecordingCommand}" ToolTip.Tip="Cancel and save to history"><material:MaterialIcon Kind="Close" Width="19"/></Button>
+      <Grid Width="16" Height="16" VerticalAlignment="Center"><Border CornerRadius="8" Background="{DynamicResource DangerSoftBrush}" IsVisible="{Binding State.IsRecording}"/><Ellipse Width="9" Height="9" Fill="{DynamicResource DangerBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding State.IsRecording}"/><controls:ActivitySpinner Width="16" Height="16" IsActive="{Binding IsPasteOnly}" Brush="{DynamicResource AccentBrush}"/></Grid>
+      <StackPanel Grid.Column="1" VerticalAlignment="Center"><TextBlock Text="{Binding PillStatusText}" FontWeight="SemiBold" FontSize="13"/><TextBlock Text="{Binding ElapsedText}" FontSize="11" Classes="muted" IsVisible="{Binding State.IsRecording}"/></StackPanel>
+      <controls:SpectrumControl Grid.Column="2" Bars="{Binding SpectrumBars}" BarBrush="{DynamicResource AccentBrush}" Height="25" MinWidth="70" Margin="6,0"/>
+      <Button Grid.Column="3" Classes="ghost" Command="{Binding CopyCommand}" ToolTip.Tip="Copy current transcript without stopping" IsVisible="{Binding State.IsRecording}"><material:MaterialIcon Kind="ContentCopy" Width="18"/></Button>
+      <Button Grid.Column="4" Classes="ghost" Command="{Binding PasteCommand}" ToolTip.Tip="Paste Recording" IsVisible="{Binding State.IsRecording}"><material:MaterialIcon Kind="ContentPaste" Width="18"/></Button>
+      <Button Grid.Column="5" Classes="ghost" Command="{Binding StopRecordingCommand}" ToolTip.Tip="Stop recording" IsVisible="{Binding State.IsRecording}"><material:MaterialIcon Kind="StopCircleOutline" Width="19"/></Button>
+      <Button Grid.Column="6" Classes="ghost danger" Command="{Binding CancelRecordingCommand}" ToolTip.Tip="Cancel recording" IsVisible="{Binding State.IsRecording}"><material:MaterialIcon Kind="Close" Width="19"/></Button>
+      <Button Grid.Column="6" Classes="ghost danger" Command="{Binding CancelPasteCommand}" ToolTip.Tip="Cancel paste" IsVisible="{Binding IsPasteOnly}"><material:MaterialIcon Kind="Close" Width="19"/></Button>
     </Grid>
   </Border>
+  </Panel>
 </Window>

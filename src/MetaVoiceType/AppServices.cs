@@ -36,6 +36,7 @@ public static class AppServices
             services.AddSingleton<IHistoryStore, JsonHistoryStore>();
             services.AddSingleton<IModelDownloadService, ModelDownloadService>();
             services.AddSingleton<IAudioCaptureService, WindowsAudioCaptureService>();
+            services.AddSingleton<AudioSpectrumService>();
             services.AddSingleton<IAudioCueService, AudioCueService>();
             services.AddSingleton<IClipboardService, WindowsClipboardService>();
             services.AddSingleton<WindowsTextInsertionService>();
@@ -66,6 +67,9 @@ public static class AppServices
     }
 
     public static T Get<T>() where T : notnull => Host.Services.GetRequiredService<T>();
+
+    public static T? TryGet<T>() where T : class
+        => Host is null ? null : Host.Services.GetService<T>();
 
     public static async Task ShutdownAsync()
     {

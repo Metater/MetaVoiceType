@@ -1,0 +1,19 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:MetaVoiceType.UI.ViewModels"
+             x:Class="MetaVoiceType.UI.Controls.AliasListEditor"
+             x:DataType="vm:AliasListEditorViewModel">
+  <StackPanel Spacing="6">
+    <ItemsControl ItemsSource="{Binding Items}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate x:DataType="vm:AliasEntryViewModel">
+          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6" Margin="0,0,0,5">
+            <TextBox Text="{Binding Value}" PlaceholderText="Spoken alias"/>
+            <Button Grid.Column="1" Classes="ghost danger compact" Command="{Binding $parent[UserControl].DataContext.RemoveCommand}" CommandParameter="{Binding}" ToolTip.Tip="Remove alias" Content="−"/>
+          </Grid>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <Button Classes="ghost compact" Content="+ Add alias" Command="{Binding AddCommand}" HorizontalAlignment="Left"/>
+  </StackPanel>
+</UserControl>

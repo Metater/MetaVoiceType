@@ -25,7 +25,8 @@
         "cancelRecording": "cancel recording",
         "cancelPaste": "cancel paste",
         "copyRecordingToClipboard": "copy recording to clipboard"
-      }
+      },
+      "commandAliases": { "pasteHere": ["paste here"] }
     },
     {
       "id": "ru",

@@ -18,6 +18,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="System.CommandLine" />
     <PackageReference Include="NAudio" />
+    <PackageReference Include="FftSharp" />
     <PackageReference Include="Vosk" />
     <PackageReference Include="org.k2fsa.sherpa.onnx" />
     <PackageReference Include="NtvLibs.cuda12.cublas.runtime.win-x64" />

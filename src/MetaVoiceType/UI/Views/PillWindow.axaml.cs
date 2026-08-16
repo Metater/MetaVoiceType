@@ -6,6 +6,7 @@ namespace MetaVoiceType.UI.Views;
 
 public sealed partial class PillWindow : Window
 {
+    private IDisposable? _spectrumLease;
     public PillWindow()
     {
         InitializeComponent();
@@ -15,8 +16,10 @@ public sealed partial class PillWindow : Window
     public void ShowWithoutActivation()
     {
         PositionAtBottomCenter();
-        if (!IsVisible) Show();
+        if (!IsVisible) { _spectrumLease ??= AppServices.TryGet<Audio.AudioSpectrumService>()?.Acquire(); Show(); }
     }
+
+    public void HidePill() { Hide(); _spectrumLease?.Dispose(); _spectrumLease = null; }
 
     private void PositionAtBottomCenter()
     {

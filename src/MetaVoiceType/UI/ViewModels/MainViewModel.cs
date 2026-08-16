@@ -5,6 +5,7 @@ using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using MetaVoiceType.Core.Interfaces;
+using MetaVoiceType.Audio;
 using MetaVoiceType.Core.Models;
 using MetaVoiceType.Core.State;
 using MetaVoiceType.Diagnostics;
@@ -17,6 +18,7 @@ namespace MetaVoiceType.UI.ViewModels;
 
 public partial class MainViewModel : ObservableObject, IDisposable
 {
+    public enum ShortcutCaptureTarget { None, RecordingToggle, CustomCommand, RecordingStarted, RecordingStopped }
     private static readonly string[] ExposedLanguageIds = ["en-us", "ru", "fr", "de", "es", "pt-br", "it", "nl", "uk", "sv", "cs", "pl"];
     private readonly ApplicationOrchestrator _orchestrator;
     private readonly IModelDownloadService _downloads;
@@ -24,6 +26,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly IGlobalHotkeyService _hotkey;
     private readonly IUpdateService _updates;
     private readonly IAudioCaptureService _audio;
+    private readonly AudioSpectrumService _spectrum;
+    private readonly IAudioCueService _cues;
     private readonly AppPaths _paths;
     private readonly StartupOptions _startupOptions;
     private readonly VoiceCommandCatalog _voiceCatalog = VoiceCommandCatalog.LoadBundled();
@@ -31,33 +35,51 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly DispatcherTimer _elapsedTimer;
     private CancellationTokenSource? _downloadCancellation;
     private CancellationTokenSource? _commandSaveDebounce;
+    private CancellationTokenSource? _deleteConfirmationTimeout;
     private bool _loading = true;
     private string? _lastDownloadKind;
+    private int _animationPhase;
 
     public MainViewModel(ApplicationOrchestrator orchestrator, IModelDownloadService downloads,
-        IStartupService startup, IGlobalHotkeyService hotkey, IUpdateService updates, IAudioCaptureService audio, AppPaths paths, StartupOptions startupOptions)
+        IStartupService startup, IGlobalHotkeyService hotkey, IUpdateService updates, IAudioCaptureService audio,
+        AudioSpectrumService spectrum, IAudioCueService cues, AppPaths paths, StartupOptions startupOptions)
     {
         _orchestrator = orchestrator; _downloads = downloads; _startup = startup; _hotkey = hotkey; _updates = updates;
-        _audio = audio; _paths = paths; _startupOptions = startupOptions;
+        _audio = audio; _spectrum = spectrum; _cues = cues; _paths = paths; _startupOptions = startupOptions;
         State = orchestrator.State;
         Languages = new(_voiceCatalog.Languages.Where(x => ExposedLanguageIds.Contains(x.Id, StringComparer.OrdinalIgnoreCase)));
         AudioDevices = new(_audio.EnumerateDevices());
         SelectedAudioDevice = AudioDevices.FirstOrDefault(x => x.IsDefault) ?? AudioDevices.FirstOrDefault();
+        BuiltInAliasEditors = new([
+            new(VoiceCommand.StartRecording, "Start recording"), new(VoiceCommand.ContinueRecording, "Continue recording"),
+            new(VoiceCommand.StopRecording, "Stop recording"), new(VoiceCommand.PasteHere, "Paste Recording"),
+            new(VoiceCommand.CancelRecording, "Cancel recording"), new(VoiceCommand.CancelPaste, "Cancel paste"),
+            new(VoiceCommand.CopyRecordingToClipboard, "Copy recording")]);
+        foreach (CommandAliasEditorViewModel editor in BuiltInAliasEditors) editor.Aliases.Changed += (_, _) => ScheduleCommandSave();
         SelectedVoiceLanguage = Languages.First(x => x.Id == "en-us");
+        _spectrum.FrameReady += OnSpectrumFrame;
+        State.History.CollectionChanged += (_, _) => { OnPropertyChanged(nameof(HasHistory)); OnPropertyChanged(nameof(CanCopyCurrent)); };
         _hotkey.ToggleRecording += (_, _) => ToggleRecording();
         State.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName is nameof(State.IsRecording) or nameof(State.LiveTranscript) or nameof(State.RecordingStartedAt) or nameof(State.ActiveVoiceLanguageId))
+            if (args.PropertyName is nameof(State.IsRecording) or nameof(State.LiveTranscript) or nameof(State.RecordingStartedAt) or nameof(State.ActiveVoiceLanguageId) or nameof(State.PasteState))
             {
                 OnPropertyChanged(nameof(RecordButtonText));
                 OnPropertyChanged(nameof(ElapsedText));
                 OnPropertyChanged(nameof(CanCopyCurrent));
                 OnPropertyChanged(nameof(CanContinueOnboarding));
                 OnPropertyChanged(nameof(MainCommandText));
+                OnPropertyChanged(nameof(PillStatusText)); OnPropertyChanged(nameof(IsPasteOnly));
+                OnPropertyChanged(nameof(PasteStatusText)); OnPropertyChanged(nameof(ShowPasteActivity));
+                OnPropertyChanged(nameof(CanStartRecording)); OnPropertyChanged(nameof(CanStopRecording)); OnPropertyChanged(nameof(CanPaste));
             }
             if (args.PropertyName is nameof(State.VoiceModelState) or nameof(State.DictationModelState) or nameof(State.Acceleration)) RefreshComputedStatus();
         };
-        _elapsedTimer = new(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) => OnPropertyChanged(nameof(ElapsedText)));
+        _elapsedTimer = new(TimeSpan.FromMilliseconds(250), DispatcherPriority.Background, (_, _) =>
+        {
+            _animationPhase = (_animationPhase + 1) % 4;
+            OnPropertyChanged(nameof(ElapsedText)); OnPropertyChanged(nameof(AnimatedStatusText)); OnPropertyChanged(nameof(PillStatusText));
+        });
         _elapsedTimer.Start();
         _ = InitializeAsync();
     }
@@ -66,7 +88,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<VoiceCommandLanguage> Languages { get; }
     public ObservableCollection<AudioDevice> AudioDevices { get; }
     public ObservableCollection<CustomVoiceCommand> CustomCommands { get; } = [];
-    public ObservableCollection<WordReplacement> WordReplacements { get; } = [];
+    public ObservableCollection<ReplacementGroupEditorViewModel> ReplacementGroups { get; } = [];
+    public ObservableCollection<CommandAliasEditorViewModel> BuiltInAliasEditors { get; }
+    public AliasListEditorViewModel CustomAliases { get; } = new();
     public IReadOnlyList<string> DictationLanguages { get; } = ["Automatic", "English"];
     public IReadOnlyList<AppTheme> Themes { get; } = [AppTheme.System, AppTheme.Dark, AppTheme.Light];
     public IReadOnlyList<CustomCommandType> CustomCommandTypes { get; } = Enum.GetValues<CustomCommandType>();
@@ -74,6 +98,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] public partial bool ShowOnboarding { get; set; } = true;
     [ObservableProperty] public partial bool ShowSettings { get; set; }
+    [ObservableProperty] public partial int SettingsTabIndex { get; set; }
     [ObservableProperty] public partial int OnboardingStep { get; set; } = 1;
     [ObservableProperty] public partial VoiceCommandLanguage SelectedVoiceLanguage { get; set; }
     [ObservableProperty] public partial AudioDevice? SelectedAudioDevice { get; set; }
@@ -81,6 +106,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial bool StartWithWindows { get; set; }
     [ObservableProperty] public partial bool CopyOnStop { get; set; } = true;
     [ObservableProperty] public partial bool ShowFloatingPill { get; set; } = true;
+    [ObservableProperty] public partial bool ForceCpuOnly { get; set; }
     [ObservableProperty] public partial AppTheme Theme { get; set; } = AppTheme.System;
     [ObservableProperty] public partial double CueVolume { get; set; } = 0.6;
     [ObservableProperty] public partial double DownloadPercent { get; set; }
@@ -88,6 +114,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial string DownloadDetail { get; set; } = "";
     [ObservableProperty] public partial bool IsDownloading { get; set; }
     [ObservableProperty] public partial bool DownloadFailed { get; set; }
+    [ObservableProperty] public partial bool ShowDeleteAllConfirmation { get; set; }
     [ObservableProperty] public partial string StartRecordingPhrase { get; set; } = "";
     [ObservableProperty] public partial string ContinueRecordingPhrase { get; set; } = "";
     [ObservableProperty] public partial string StopRecordingPhrase { get; set; } = "";
@@ -100,16 +127,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial bool UpdateAvailable { get; set; }
     [ObservableProperty] public partial string HotkeyGesture { get; set; } = "Ctrl+Space";
     [ObservableProperty] public partial string HotkeyValidation { get; set; } = "";
-    [ObservableProperty] public partial bool IsCapturingHotkey { get; set; }
-    [ObservableProperty] public partial bool IsCapturingCustomShortcut { get; set; }
-    [ObservableProperty] public partial bool IsCapturingRecordingStartedShortcut { get; set; }
-    [ObservableProperty] public partial bool IsCapturingRecordingStoppedShortcut { get; set; }
+    [ObservableProperty] public partial ShortcutCaptureTarget ActiveShortcutCapture { get; set; }
     [ObservableProperty] public partial string RecordingStartedShortcut { get; set; } = "";
     [ObservableProperty] public partial string RecordingStoppedShortcut { get; set; } = "";
     [ObservableProperty] public partial CustomVoiceCommand? SelectedCustomCommand { get; set; }
-    [ObservableProperty] public partial WordReplacement? SelectedWordReplacement { get; set; }
+    [ObservableProperty] public partial CustomCommandType SelectedCustomCommandType { get; set; }
     [ObservableProperty] public partial TranscriptRecord? PendingDeleteRecord { get; set; }
     [ObservableProperty] public partial string CustomCommandValidation { get; set; } = "";
+    [ObservableProperty] public partial IReadOnlyList<double> SpectrumBars { get; set; } = new double[AudioSpectrumService.BarCount];
+
+    public bool IsCapturingHotkey => ActiveShortcutCapture == ShortcutCaptureTarget.RecordingToggle;
+    public bool IsCapturingCustomShortcut => ActiveShortcutCapture == ShortcutCaptureTarget.CustomCommand;
+    public bool IsCapturingRecordingStartedShortcut => ActiveShortcutCapture == ShortcutCaptureTarget.RecordingStarted;
+    public bool IsCapturingRecordingStoppedShortcut => ActiveShortcutCapture == ShortcutCaptureTarget.RecordingStopped;
+    public bool HasSelectedCustomCommand => SelectedCustomCommand is not null;
+    public bool ShowProgramFields => HasSelectedCustomCommand && SelectedCustomCommandType == CustomCommandType.Program;
+    public bool ShowScriptFields => HasSelectedCustomCommand && SelectedCustomCommandType is CustomCommandType.PowerShell or CustomCommandType.CommandPrompt;
+    public bool ShowShortcutFields => HasSelectedCustomCommand && SelectedCustomCommandType == CustomCommandType.KeyboardShortcut;
 
     public bool IsWelcomeStep => OnboardingStep == 1;
     public bool IsVoiceStep => OnboardingStep == 2;
@@ -133,19 +167,37 @@ public partial class MainViewModel : ObservableObject, IDisposable
             string? id = State.ActiveVoiceLanguageId;
             if (id is null) return "Voice command model not active";
             VoiceCommandLanguage language = _voiceCatalog.Get(id);
-            IReadOnlyDictionary<VoiceCommand, string> phrases = _orchestrator.ResolvePhrases(language);
-            return VoiceCommandCopy.ForRecordingState(State.IsRecording, phrases);
+            return VoiceCommandCopy.ForRecordingState(State.IsRecording, _orchestrator.ResolveAliases(language));
         }
     }
+    public string AnimatedStatusText => Animate(State.StatusMessage);
+    public string PillStatusText => State.IsRecording ? Animate("Recording") : State.PasteState switch
+    {
+        PasteRequestState.Queued => Animate("Preparing"),
+        PasteRequestState.Preparing => Animate("Preparing"),
+        PasteRequestState.Pasting => Animate("Pasting"),
+        PasteRequestState.Succeeded => "Pasted",
+        PasteRequestState.Failed => "Paste failed",
+        PasteRequestState.Canceled => "Paste canceled",
+        _ => "Ready"
+    };
+    public bool IsPasteOnly => !State.IsRecording && State.IsPasteActive;
+    public bool ShowPasteActivity => State.IsPasteActive;
+    public string PasteStatusText => State.PasteState == PasteRequestState.Pasting ? Animate("Pasting") : Animate("Preparing");
+    public bool CanStartRecording => !State.IsRecording;
+    public bool CanStopRecording => State.IsRecording;
+    public bool CanPaste => !State.IsPasteActive;
     public string ElapsedText => State.RecordingStartedAt is DateTimeOffset started ? FormatElapsed(DateTimeOffset.UtcNow - started) : "00:00";
     public bool CanCopyCurrent => !string.IsNullOrWhiteSpace(State.LiveTranscript) || State.History.Count > 0;
+    public bool HasHistory => State.History.Count > 0;
     public string VoiceLanguageStatus => SelectedVoiceLanguage.Id == State.ActiveVoiceLanguageId ? $"{SelectedVoiceLanguage.DisplayName} · Active"
         : State.VoiceModelState == "Downloading" ? $"{SelectedVoiceLanguage.DisplayName} · Downloading {DownloadPercent:F0}%" : $"{SelectedVoiceLanguage.DisplayName} · Not active";
-    public string CurrentListenerStatus => State.ActiveVoiceLanguageId is null ? "No command listener" : $"Current listener: {Languages.FirstOrDefault(x => x.Id == State.ActiveVoiceLanguageId)?.DisplayName ?? State.ActiveVoiceLanguageId}";
+    public string CurrentListenerStatus => State.ActiveVoiceLanguageId is null ? "Voice command language: Not active" : $"Voice command language: {Languages.FirstOrDefault(x => x.Id == State.ActiveVoiceLanguageId)?.DisplayName ?? State.ActiveVoiceLanguageId}";
     public string DiagnosticsSummary => $"ASR: {State.EngineLabel}\nProvider: {State.Acceleration}\nVosk: {State.ActiveVoiceLanguageId ?? "not active"}\nMicrophone: {SelectedAudioDevice?.Name ?? "unavailable"}";
     public string ParakeetV2Status => IsInstalledArtifact("parakeet-v2") ? "Installed" : "Not installed";
     public string ParakeetV3Status => IsInstalledArtifact("parakeet-v3") ? "Installed" : "Not installed";
     public string AccelerationStatus => State.Acceleration is "Not installed" ? "CPU fallback available" : State.Acceleration;
+    public bool ShowNvidiaMark => State.Acceleration == "GPU" && _orchestrator.HasNvidiaGpu;
 
     private async Task InitializeAsync()
     {
@@ -154,12 +206,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
         SelectedVoiceLanguage = Languages.FirstOrDefault(x => x.Id == settings.VoiceCommandLanguage) ?? Languages[0];
         SelectedAudioDevice = AudioDevices.FirstOrDefault(x => x.Id == settings.AudioDeviceId) ?? AudioDevices.FirstOrDefault(x => x.IsDefault) ?? AudioDevices.FirstOrDefault();
         SelectedDictationLanguage = settings.DictationMode == DictationMode.English ? "English" : "Automatic";
-        StartWithWindows = settings.StartWithWindows; CopyOnStop = settings.CopyOnStop; ShowFloatingPill = settings.ShowFloatingPill;
+        StartWithWindows = settings.StartWithWindows; CopyOnStop = settings.CopyOnStop; ShowFloatingPill = settings.ShowFloatingPill; ForceCpuOnly = settings.ForceCpuOnly;
         Theme = settings.Theme; CueVolume = settings.CueVolume; HotkeyGesture = settings.ToggleHotkey;
         RecordingStartedShortcut = settings.RecordingStartedShortcut ?? "";
         RecordingStoppedShortcut = settings.RecordingStoppedShortcut ?? "";
         foreach (CustomVoiceCommand command in settings.CustomCommands) CustomCommands.Add(command);
-        foreach (WordReplacement replacement in settings.WordReplacements) WordReplacements.Add(replacement);
+        foreach (WordReplacementGroup group in settings.WordReplacementGroups) ReplacementGroups.Add(new(group));
         ApplyTheme(Theme);
         ShowOnboarding = !settings.OnboardingComplete;
         LoadPhrases();
@@ -168,8 +220,28 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (settings.CheckForUpdates) await CheckForUpdatesAsync();
         _loading = false;
         RefreshComputedStatus();
-        if (_startupOptions.UiView?.Equals("settings", StringComparison.OrdinalIgnoreCase) == true) ShowSettings = true;
-        else if (_startupOptions.UiView?.Equals("pill", StringComparison.OrdinalIgnoreCase) == true) _orchestrator.StartRecording();
+        if (_startupOptions.UiView is string view && (view.Equals("settings", StringComparison.OrdinalIgnoreCase) || view.StartsWith("settings-", StringComparison.OrdinalIgnoreCase)))
+        {
+            ShowSettings = true;
+            SettingsTabIndex = view.ToLowerInvariant() switch
+            {
+                "settings-voice" => 1,
+                "settings-custom" => 2,
+                "settings-replacements" => 3,
+                "settings-audio" => 4,
+                "settings-about" => 5,
+                _ => 0
+            };
+            if (SettingsTabIndex == 2 && CustomCommands.Count > 0) SelectedCustomCommand = CustomCommands[0];
+        }
+        else if (_startupOptions.UiView?.Equals("pill", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            State.RecordingStartedAt = DateTimeOffset.UtcNow;
+            State.StatusMessage = "Recording";
+            State.IsRecording = true;
+        }
+        else if (_startupOptions.UiView?.Equals("paste-pill", StringComparison.OrdinalIgnoreCase) == true)
+            State.PasteState = PasteRequestState.Preparing;
     }
 
     partial void OnOnboardingStepChanged(int value)
@@ -184,6 +256,23 @@ public partial class MainViewModel : ObservableObject, IDisposable
         State.SelectedVoiceLanguageId = value.Id;
         LoadPhrases();
         RefreshComputedStatus();
+    }
+    partial void OnSelectedCustomCommandChanged(CustomVoiceCommand? value)
+    {
+        CustomAliases.Replace(value?.Aliases ?? []);
+        SelectedCustomCommandType = value?.CommandType ?? CustomCommandType.Program;
+        OnPropertyChanged(nameof(HasSelectedCustomCommand));
+        OnPropertyChanged(nameof(ShowProgramFields)); OnPropertyChanged(nameof(ShowScriptFields)); OnPropertyChanged(nameof(ShowShortcutFields));
+    }
+    partial void OnSelectedCustomCommandTypeChanged(CustomCommandType value)
+    {
+        if (SelectedCustomCommand is not null) SelectedCustomCommand.CommandType = value;
+        OnPropertyChanged(nameof(ShowProgramFields)); OnPropertyChanged(nameof(ShowScriptFields)); OnPropertyChanged(nameof(ShowShortcutFields));
+    }
+    partial void OnActiveShortcutCaptureChanged(ShortcutCaptureTarget value)
+    {
+        OnPropertyChanged(nameof(IsCapturingHotkey)); OnPropertyChanged(nameof(IsCapturingCustomShortcut));
+        OnPropertyChanged(nameof(IsCapturingRecordingStartedShortcut)); OnPropertyChanged(nameof(IsCapturingRecordingStoppedShortcut));
     }
     partial void OnThemeChanged(AppTheme value) { if (!_loading) ApplyTheme(value); }
     partial void OnDownloadPercentChanged(double value) => OnPropertyChanged(nameof(VoiceLanguageStatus));
@@ -201,10 +290,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (SelectedVoiceLanguage is null) return;
         _loading = true;
         IReadOnlyDictionary<VoiceCommand, string> values = _orchestrator.ResolvePhrases(SelectedVoiceLanguage);
+        IReadOnlyDictionary<VoiceCommand, IReadOnlyList<string>> aliases = _orchestrator.ResolveAliases(SelectedVoiceLanguage);
+        foreach (CommandAliasEditorViewModel editor in BuiltInAliasEditors) editor.Aliases.Replace(aliases[editor.Command]);
         StartRecordingPhrase = values[VoiceCommand.StartRecording]; ContinueRecordingPhrase = values[VoiceCommand.ContinueRecording]; StopRecordingPhrase = values[VoiceCommand.StopRecording]; PasteHerePhrase = values[VoiceCommand.PasteHere];
         CancelRecordingPhrase = values[VoiceCommand.CancelRecording]; CancelPastePhrase = values[VoiceCommand.CancelPaste]; CopyPhrase = values[VoiceCommand.CopyRecordingToClipboard];
         _loading = false;
     }
+
+    private Dictionary<VoiceCommand, IReadOnlyList<string>> CurrentAliases() => BuiltInAliasEditors
+        .ToDictionary(x => x.Command, x => (IReadOnlyList<string>)x.Aliases.Values);
 
     private Dictionary<VoiceCommand, string> CurrentPhrases() => new()
     {
@@ -220,14 +314,27 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand] private void NextOnboarding() { if (CanContinueOnboarding && OnboardingStep < 7) OnboardingStep++; }
     [RelayCommand] private void PreviousOnboarding() { if (OnboardingStep > 1) OnboardingStep--; }
     [RelayCommand] private void ToggleSettings() => ShowSettings = !ShowSettings;
-    [RelayCommand] private void ToggleRecording() { if (IsCapturingHotkey || IsCapturingCustomShortcut) return; if (State.IsRecording) _orchestrator.StopRecording(); else _orchestrator.StartRecording(); }
+    [RelayCommand] private void ToggleRecording() { if (ActiveShortcutCapture != ShortcutCaptureTarget.None) return; if (State.IsRecording) _orchestrator.StopRecording(); else _orchestrator.StartRecording(); }
     [RelayCommand] private void StopRecording() => _orchestrator.StopRecording();
     [RelayCommand] private void ContinueRecording() => _orchestrator.ContinueRecording();
     [RelayCommand] private void Paste() => _orchestrator.PasteHere();
+    [RelayCommand] private void CancelPaste() => _orchestrator.CancelPaste();
     [RelayCommand] private void CancelRecording() => _orchestrator.StopRecording(canceled: true);
     [RelayCommand] private Task CopyAsync() => _orchestrator.CopyCurrentAsync();
     [RelayCommand] private Task CopyHistoryAsync(TranscriptRecord record) => _orchestrator.CopyRecordAsync(record);
-    [RelayCommand] private void RequestDeleteHistory(TranscriptRecord record) => PendingDeleteRecord = record;
+    [RelayCommand] private void RequestDeleteHistory(TranscriptRecord record)
+    {
+        if (ReferenceEquals(PendingDeleteRecord, record)) { _ = ConfirmDeleteHistoryAsync(); return; }
+        PendingDeleteRecord = record;
+        _deleteConfirmationTimeout?.Cancel(); _deleteConfirmationTimeout?.Dispose();
+        _deleteConfirmationTimeout = new();
+        CancellationToken token = _deleteConfirmationTimeout.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(TimeSpan.FromSeconds(4), token); Dispatcher.UIThread.Post(() => PendingDeleteRecord = null); }
+            catch (OperationCanceledException) { }
+        });
+    }
     [RelayCommand] private void CancelDeleteHistory() => PendingDeleteRecord = null;
     [RelayCommand]
     private async Task ConfirmDeleteHistoryAsync()
@@ -237,6 +344,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
         await _orchestrator.DeleteRecordAsync(record);
         PendingDeleteRecord = null;
     }
+    [RelayCommand] private void RequestDeleteAll() => ShowDeleteAllConfirmation = true;
+    [RelayCommand] private void CancelDeleteAll() => ShowDeleteAllConfirmation = false;
+    [RelayCommand] private async Task ConfirmDeleteAllAsync() { await _orchestrator.DeleteAllHistoryAsync(); ShowDeleteAllConfirmation = false; }
+    [RelayCommand] private void TestCue() => _cues.PlayAccepted(VoiceCommand.StartRecording, CueVolume);
     [RelayCommand] private void CancelDownload() => _downloadCancellation?.Cancel();
 
     [RelayCommand]
@@ -326,12 +437,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 StartWithWindows = StartWithWindows,
                 CopyOnStop = CopyOnStop,
                 ShowFloatingPill = ShowFloatingPill,
+                ForceCpuOnly = ForceCpuOnly,
                 Theme = Theme,
                 CueVolume = CueVolume,
                 ToggleHotkey = HotkeyGesture,
                 RecordingStartedShortcut = EmptyToNull(RecordingStartedShortcut),
                 RecordingStoppedShortcut = EmptyToNull(RecordingStoppedShortcut),
-                WordReplacements = WordReplacements.ToList()
+                WordReplacementGroups = ReplacementGroups.Select(x => x.ToModel()).ToList()
             };
             await _orchestrator.UpdateSettingsAsync(settings);
             _startup.SetEnabled(StartWithWindows);
@@ -377,11 +489,24 @@ public partial class MainViewModel : ObservableObject, IDisposable
         try { await _updates.DownloadAndRestartAsync(new Progress<int>(value => DownloadPercent = value)); }
         finally { IsDownloading = false; }
     }
-    [RelayCommand] private void ResetCommands() { _loading = true; StartRecordingPhrase = SelectedVoiceLanguage.Commands["startRecording"]; ContinueRecordingPhrase = SelectedVoiceLanguage.Commands["continueRecording"]; StopRecordingPhrase = SelectedVoiceLanguage.Commands["stopRecording"]; PasteHerePhrase = SelectedVoiceLanguage.Commands["pasteHere"]; CancelRecordingPhrase = SelectedVoiceLanguage.Commands["cancelRecording"]; CancelPastePhrase = SelectedVoiceLanguage.Commands["cancelPaste"]; CopyPhrase = SelectedVoiceLanguage.Commands["copyRecordingToClipboard"]; _loading = false; ScheduleCommandSave(); }
-    [RelayCommand] private void BeginHotkeyCapture() { IsCapturingHotkey = true; HotkeyValidation = "Press a shortcut…"; }
-    [RelayCommand] private void BeginCustomShortcutCapture() { if (SelectedCustomCommand is not null) { IsCapturingCustomShortcut = true; CustomCommandValidation = "Press a shortcut…"; } }
-    [RelayCommand] private void BeginRecordingStartedShortcutCapture() { CancelShortcutCapture(); IsCapturingRecordingStartedShortcut = true; HotkeyValidation = "Press a shortcut…"; }
-    [RelayCommand] private void BeginRecordingStoppedShortcutCapture() { CancelShortcutCapture(); IsCapturingRecordingStoppedShortcut = true; HotkeyValidation = "Press a shortcut…"; }
+    [RelayCommand]
+    private void ResetCommands()
+    {
+        _loading = true;
+        foreach (CommandAliasEditorViewModel editor in BuiltInAliasEditors)
+        {
+            string key = VoiceCommandKeys.All[editor.Command];
+            var values = new List<string> { SelectedVoiceLanguage.Commands[key] };
+            if (SelectedVoiceLanguage.CommandAliases?.GetValueOrDefault(key) is { Count: > 0 } extras) values.AddRange(extras);
+            editor.Aliases.Replace(values);
+        }
+        _loading = false;
+        ScheduleCommandSave();
+    }
+    [RelayCommand] private void BeginHotkeyCapture() { ActiveShortcutCapture = ShortcutCaptureTarget.RecordingToggle; HotkeyValidation = "Press a shortcut…"; }
+    [RelayCommand] private void BeginCustomShortcutCapture() { if (SelectedCustomCommand is not null) { ActiveShortcutCapture = ShortcutCaptureTarget.CustomCommand; CustomCommandValidation = "Press a shortcut…"; } }
+    [RelayCommand] private void BeginRecordingStartedShortcutCapture() { ActiveShortcutCapture = ShortcutCaptureTarget.RecordingStarted; HotkeyValidation = "Press a shortcut…"; }
+    [RelayCommand] private void BeginRecordingStoppedShortcutCapture() { ActiveShortcutCapture = ShortcutCaptureTarget.RecordingStopped; HotkeyValidation = "Press a shortcut…"; }
     [RelayCommand] private void ClearRecordingStartedShortcut() => RecordingStartedShortcut = "";
     [RelayCommand] private void ClearRecordingStoppedShortcut() => RecordingStoppedShortcut = "";
     [RelayCommand] private async Task ResetHotkeyAsync() { HotkeyGesture = "Ctrl+Space"; HotkeyChangeResult result = await _hotkey.ChangeAsync(HotkeyGesture); HotkeyValidation = result.Error ?? ""; }
@@ -389,7 +514,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public async Task CaptureHotkeyAsync(string gesture)
     {
         HotkeyChangeResult result = await _hotkey.ChangeAsync(gesture);
-        IsCapturingHotkey = false;
+        ActiveShortcutCapture = ShortcutCaptureTarget.None;
         HotkeyGesture = result.ActiveGesture;
         HotkeyValidation = result.Success ? "" : result.Error ?? "Shortcut could not be activated.";
         if (result.Success) await _orchestrator.UpdateSettingsAsync(_orchestrator.Settings with { ToggleHotkey = result.ActiveGesture });
@@ -397,7 +522,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void CaptureCustomShortcut(string gesture)
     {
-        IsCapturingCustomShortcut = false;
+        ActiveShortcutCapture = ShortcutCaptureTarget.None;
         if (SelectedCustomCommand is null) return;
         try
         {
@@ -418,19 +543,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
             HotkeyValidation = "Shortcut captured. Save to apply.";
         }
         catch (FormatException ex) { HotkeyValidation = ex.Message; }
-        finally { IsCapturingRecordingStartedShortcut = false; IsCapturingRecordingStoppedShortcut = false; }
+        finally { ActiveShortcutCapture = ShortcutCaptureTarget.None; }
     }
 
     private void CancelShortcutCapture()
     {
-        IsCapturingHotkey = false; IsCapturingCustomShortcut = false;
-        IsCapturingRecordingStartedShortcut = false; IsCapturingRecordingStoppedShortcut = false;
+        ActiveShortcutCapture = ShortcutCaptureTarget.None;
     }
 
     [RelayCommand]
     private void AddCustomCommand()
     {
-        var command = new CustomVoiceCommand { VoiceCommandLanguageId = SelectedVoiceLanguage.Id, Name = "New command", CommandType = CustomCommandType.Program };
+        var command = new CustomVoiceCommand { VoiceCommandLanguageId = SelectedVoiceLanguage.Id, Name = "New command", CommandType = CustomCommandType.Program, Aliases = [""] };
         CustomCommands.Add(command); SelectedCustomCommand = command;
     }
 
@@ -440,6 +564,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         if (SelectedCustomCommand is null) return;
         try
         {
+            SelectedCustomCommand.Aliases = CustomAliases.Values.ToList();
+            SelectedCustomCommand.Phrase = SelectedCustomCommand.Aliases.FirstOrDefault() ?? "";
             VoiceCommandLanguage commandLanguage = _voiceCatalog.Get(SelectedCustomCommand.VoiceCommandLanguageId);
             CustomCommandValidator.Validate(SelectedCustomCommand, _orchestrator.ResolvePhrases(commandLanguage).Values, CustomCommands);
             var commands = CustomCommands.ToList();
@@ -460,9 +586,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private void AddWordReplacement()
     {
-        var replacement = new WordReplacement();
-        WordReplacements.Add(replacement);
-        SelectedWordReplacement = replacement;
+        ReplacementGroups.Add(new(new WordReplacementGroup { Matches = [""] }));
     }
 
     [RelayCommand]
@@ -470,18 +594,18 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         try
         {
-            foreach (WordReplacement replacement in WordReplacements) WordReplacementEngine.Validate(replacement);
-            await _orchestrator.UpdateSettingsAsync(_orchestrator.Settings with { WordReplacements = WordReplacements.ToList() });
+            List<WordReplacementGroup> groups = ReplacementGroups.Select(x => x.ToModel()).ToList();
+            foreach (WordReplacementGroup group in groups) WordReplacementEngine.Validate(group);
+            await _orchestrator.UpdateSettingsAsync(_orchestrator.Settings with { WordReplacementGroups = groups });
             CommandValidation = "Word replacements saved";
         }
         catch (Exception ex) { CommandValidation = ex.Message; }
     }
 
     [RelayCommand]
-    private async Task DeleteWordReplacementAsync(WordReplacement replacement)
+    private async Task DeleteWordReplacementAsync(ReplacementGroupEditorViewModel replacement)
     {
-        WordReplacements.Remove(replacement);
-        if (ReferenceEquals(SelectedWordReplacement, replacement)) SelectedWordReplacement = null;
+        ReplacementGroups.Remove(replacement);
         await SaveWordReplacementsAsync();
     }
 
@@ -496,7 +620,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             try
             {
                 await Task.Delay(450, token);
-                await _orchestrator.UpdateCommandPhrasesAsync(SelectedVoiceLanguage.Id, CurrentPhrases(), token);
+                await _orchestrator.UpdateCommandAliasesAsync(SelectedVoiceLanguage.Id, CurrentAliases(), token);
                 Dispatcher.UIThread.Post(() => { CommandValidation = "Saved"; OnPropertyChanged(nameof(MainCommandText)); });
             }
             catch (OperationCanceledException) { }
@@ -533,6 +657,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(VoiceLanguageStatus)); OnPropertyChanged(nameof(CurrentListenerStatus)); OnPropertyChanged(nameof(DiagnosticsSummary)); OnPropertyChanged(nameof(MainCommandText));
         OnPropertyChanged(nameof(ParakeetV2Status)); OnPropertyChanged(nameof(ParakeetV3Status)); OnPropertyChanged(nameof(AccelerationStatus));
+        OnPropertyChanged(nameof(ShowNvidiaMark));
         OnPropertyChanged(nameof(CanContinueOnboarding));
     }
     private static string FormatBytes(long bytes) => bytes switch { >= 1_073_741_824 => $"{bytes / 1_073_741_824d:F1} GB", >= 1_048_576 => $"{bytes / 1_048_576d:F1} MB", >= 1024 => $"{bytes / 1024d:F1} KB", _ => $"{bytes} B" };
@@ -543,6 +668,13 @@ public partial class MainViewModel : ObservableObject, IDisposable
         return IsInstalled(Path.Combine(_paths.DictationModels, artifact.ExpectedDirectory), artifact);
     }
     private static string FormatElapsed(TimeSpan elapsed) => elapsed.TotalHours >= 1 ? elapsed.ToString(@"h\:mm\:ss", System.Globalization.CultureInfo.InvariantCulture) : elapsed.ToString(@"mm\:ss", System.Globalization.CultureInfo.InvariantCulture);
+    private string Animate(string value)
+    {
+        string label = value.TrimEnd('.', '…');
+        return label.StartsWith("Recording", StringComparison.Ordinal) || label.StartsWith("Pasting", StringComparison.Ordinal) || label.StartsWith("Preparing", StringComparison.Ordinal)
+            ? label + new string('.', _animationPhase) : value;
+    }
+    private void OnSpectrumFrame(object? sender, IReadOnlyList<double> frame) => Dispatcher.UIThread.Post(() => SpectrumBars = frame);
 
     public bool ShouldShowCloseToTrayNotice => !_orchestrator.Settings.CloseToTrayNoticeShown;
     public Task MarkCloseToTrayNoticeShownAsync() => _orchestrator.UpdateSettingsAsync(_orchestrator.Settings with { CloseToTrayNoticeShown = true });
@@ -550,8 +682,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _elapsedTimer.Stop();
+        _spectrum.FrameReady -= OnSpectrumFrame;
         _downloadCancellation?.Cancel(); _downloadCancellation?.Dispose(); _downloadCancellation = null;
         _commandSaveDebounce?.Cancel(); _commandSaveDebounce?.Dispose(); _commandSaveDebounce = null;
+        _deleteConfirmationTimeout?.Cancel(); _deleteConfirmationTimeout?.Dispose(); _deleteConfirmationTimeout = null;
         GC.SuppressFinalize(this);
     }
 }

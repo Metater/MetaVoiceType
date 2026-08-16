@@ -51,7 +51,11 @@ public static class ShortcutGestureParser
         ["PageDown"] = KeyCode.VcPageDown,
         ["Insert"] = KeyCode.VcInsert,
         ["Delete"] = KeyCode.VcDelete,
-        ["Backspace"] = KeyCode.VcBackspace
+        ["Backspace"] = KeyCode.VcBackspace,
+        ["Scroll"] = KeyCode.VcScrollLock,
+        ["ScrollLock"] = KeyCode.VcScrollLock,
+        ["Pause"] = KeyCode.VcPause,
+        ["PrintScreen"] = KeyCode.VcPrintScreen
     };
 
     public static ShortcutGesture Parse(string value) => ParseCore(value, requireModifier: true);

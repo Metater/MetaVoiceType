@@ -15,7 +15,12 @@ public interface ISpeechSegmenter : IDisposable
 
 public sealed class SherpaVadSegmenter : ISpeechSegmenter
 {
-    private const int WindowSize = 512;
+    public const int WindowSize = 512;
+    public const float SpeechThreshold = 0.25f;
+    public const float MinimumSilenceSeconds = 0.30f;
+    public const float MinimumSpeechSeconds = 0.15f;
+    public const float MaximumSpeechSeconds = 10f;
+    public static double TailClosureBudgetMilliseconds => Math.Ceiling(MinimumSilenceSeconds * 16000 / WindowSize) * WindowSize / 16d;
     private readonly VoiceActivityDetector _vad;
     private readonly float[] _window = new float[WindowSize];
     private int _windowCount;
@@ -24,10 +29,10 @@ public sealed class SherpaVadSegmenter : ISpeechSegmenter
     {
         var config = new VadModelConfig();
         config.SileroVad.Model = modelPath;
-        config.SileroVad.Threshold = 0.3f;
-        config.SileroVad.MinSilenceDuration = 0.45f;
-        config.SileroVad.MinSpeechDuration = 0.2f;
-        config.SileroVad.MaxSpeechDuration = 20f;
+        config.SileroVad.Threshold = SpeechThreshold;
+        config.SileroVad.MinSilenceDuration = MinimumSilenceSeconds;
+        config.SileroVad.MinSpeechDuration = MinimumSpeechSeconds;
+        config.SileroVad.MaxSpeechDuration = MaximumSpeechSeconds;
         config.SileroVad.WindowSize = WindowSize;
         config.SampleRate = 16000;
         config.NumThreads = 1;

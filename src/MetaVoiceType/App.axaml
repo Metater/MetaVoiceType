@@ -20,10 +20,16 @@
       <SolidColorBrush x:Key="CanvasBrush" Color="{DynamicResource CanvasColor}"/><SolidColorBrush x:Key="SurfaceBrush" Color="{DynamicResource SurfaceColor}"/><SolidColorBrush x:Key="SurfaceRaisedBrush" Color="{DynamicResource SurfaceRaisedColor}"/><SolidColorBrush x:Key="SurfaceHoverBrush" Color="{DynamicResource SurfaceHoverColor}"/><SolidColorBrush x:Key="BorderBrush" Color="{DynamicResource BorderColor}"/>
       <SolidColorBrush x:Key="TextBrush" Color="{DynamicResource TextColor}"/><SolidColorBrush x:Key="MutedTextBrush" Color="{DynamicResource MutedTextColor}"/><SolidColorBrush x:Key="SubtleTextBrush" Color="{DynamicResource SubtleTextColor}"/><SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource AccentColor}"/><SolidColorBrush x:Key="AccentHoverBrush" Color="{DynamicResource AccentHoverColor}"/><SolidColorBrush x:Key="AccentSoftBrush" Color="{DynamicResource AccentSoftColor}"/><SolidColorBrush x:Key="AccentForegroundBrush" Color="{DynamicResource AccentForegroundColor}"/>
       <SolidColorBrush x:Key="SuccessBrush" Color="{DynamicResource SuccessColor}"/><SolidColorBrush x:Key="SuccessSoftBrush" Color="{DynamicResource SuccessSoftColor}"/><SolidColorBrush x:Key="WarningBrush" Color="{DynamicResource WarningColor}"/><SolidColorBrush x:Key="DangerBrush" Color="{DynamicResource DangerColor}"/><SolidColorBrush x:Key="DangerSoftBrush" Color="{DynamicResource DangerSoftColor}"/>
+      <SolidColorBrush x:Key="SystemControlHighlightAccentBrush" Color="{DynamicResource AccentColor}"/><SolidColorBrush x:Key="SystemControlHighlightAltAccentBrush" Color="{DynamicResource AccentHoverColor}"/><SolidColorBrush x:Key="SystemControlForegroundAccentBrush" Color="{DynamicResource AccentColor}"/>
     </ResourceDictionary>
   </Application.Resources>
   <Application.Styles>
-    <FluentTheme/>
+    <FluentTheme>
+      <FluentTheme.Palettes>
+        <ColorPaletteResources x:Key="Light" Accent="#6550E8"/>
+        <ColorPaletteResources x:Key="Dark" Accent="#8068FF"/>
+      </FluentTheme.Palettes>
+    </FluentTheme>
     <material:MaterialIconStyles/>
     <Style Selector="Window"><Setter Property="FontFamily" Value="avares://Avalonia.Fonts.Inter/Assets#Inter"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
     <Style Selector="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
@@ -34,6 +40,7 @@
     <Style Selector="Border.soft"><Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}"/><Setter Property="CornerRadius" Value="11"/><Setter Property="Padding" Value="13"/></Style>
     <Style Selector="Button"><Setter Property="CornerRadius" Value="9"/><Setter Property="Padding" Value="14,9"/></Style><Style Selector="Button.primary"><Setter Property="Background" Value="{DynamicResource AccentBrush}"/><Setter Property="Foreground" Value="{DynamicResource AccentForegroundBrush}"/><Setter Property="FontWeight" Value="SemiBold"/></Style><Style Selector="Button.primary:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource AccentHoverBrush}"/></Style>
     <Style Selector="Button.ghost"><Setter Property="Background" Value="Transparent"/><Setter Property="Padding" Value="10,8"/></Style><Style Selector="Button.ghost:pointerover /template/ ContentPresenter"><Setter Property="Background" Value="{DynamicResource SurfaceHoverBrush}"/></Style><Style Selector="Button.danger"><Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/></Style>
+    <Style Selector="Button.compact"><Setter Property="Padding" Value="8,5"/><Setter Property="MinHeight" Value="30"/></Style>
     <Style Selector="TextBox, ComboBox"><Setter Property="MinHeight" Value="38"/></Style><Style Selector="ProgressBar"><Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/></Style>
     <Style Selector="TabItem"><Setter Property="FontSize" Value="14"/><Setter Property="Padding" Value="12,9"/></Style>
   </Application.Styles>

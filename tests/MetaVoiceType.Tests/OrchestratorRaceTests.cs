@@ -108,6 +108,57 @@ public sealed class OrchestratorRaceTests
         }
     }
 
+    [AvaloniaFact]
+    public async Task OldPasteCanRemainActiveWhileANewRecordingStartsAndCompletesUnaffected()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MetaVoiceType.Tests", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root);
+        var audio = new FakeAudio();
+        var history = new FakeHistory();
+        var insertion = new BlockingPasteInsertion();
+        var state = new MetaVoiceTypeState();
+        using var paste = new PasteCoordinator(new FakeClipboard(), insertion, NullLogger<PasteCoordinator>.Instance);
+        var backend = new BlockingBackend("recording A");
+        var orchestrator = new ApplicationOrchestrator(audio, history, new FakeSettings(new AppSettings { OnboardingComplete = true, CopyOnStop = false }), paste,
+            new DecodeCoordinator(NullLogger<DecodeCoordinator>.Instance), new RecoveryWriter(paths, NullLogger<RecoveryWriter>.Instance),
+            new VoskCommandRecognizer(NullLogger<VoskCommandRecognizer>.Instance),
+            new CustomCommandExecutor(new FakeInput(), NullLogger<CustomCommandExecutor>.Instance), new RecordingEventShortcutPlayer(new FakeInput()),
+            new FakeCues(), state,
+            new SherpaRuntimeBootstrapper(paths, new(false, false, false, true, false, false, null, "auto"), NullLogger<SherpaRuntimeBootstrapper>.Instance),
+            NullLoggerFactory.Instance, NullLogger<ApplicationOrchestrator>.Instance)
+        { SegmenterFactory = _ => new FlushSegmenter(new float[4_000]) };
+        CancellationToken token = TestContext.Current.CancellationToken;
+        try
+        {
+            await orchestrator.InitializeAsync(token);
+            orchestrator.SetBackendForTesting(backend);
+            Assert.True(orchestrator.StartRecording());
+            audio.Emit(Pcm16Converter.Convert(new byte[8_000]));
+            Assert.Equal(PasteRequestResult.Accepted, orchestrator.PasteHere());
+            await backend.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), token);
+            backend.Release.TrySetResult();
+            await insertion.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), token);
+
+            Assert.True(paste.IsActive);
+            Assert.True(orchestrator.StartRecording());
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.True(state.IsRecording);
+            insertion.Release.TrySetResult();
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+            timeout.CancelAfter(TimeSpan.FromSeconds(5));
+            while (paste.IsActive) await Task.Delay(10, timeout.Token);
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => { });
+            Assert.True(state.IsRecording);
+            Assert.True(orchestrator.StopRecording());
+        }
+        finally
+        {
+            insertion.Release.TrySetResult();
+            await orchestrator.DisposeAsync();
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
     private sealed class BlockingBackend(string text) : IAsrBackend
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -143,6 +194,7 @@ public sealed class OrchestratorRaceTests
         public Task<IReadOnlyList<TranscriptRecord>> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TranscriptRecord>>(Records.ToArray());
         public Task AddAsync(TranscriptRecord record, CancellationToken cancellationToken = default) { Records.RemoveAll(x => x.LogicalId == record.LogicalId); Records.Add(record); return Task.CompletedTask; }
         public Task DeleteAsync(string logicalTranscriptId, CancellationToken cancellationToken = default) { Records.RemoveAll(x => x.LogicalId == logicalTranscriptId); return Task.CompletedTask; }
+        public Task DeleteAllAsync(CancellationToken cancellationToken = default) { Records.Clear(); return Task.CompletedTask; }
     }
 
     private sealed class FakeSettings(AppSettings value) : ISettingsStore
@@ -162,6 +214,17 @@ public sealed class OrchestratorRaceTests
         public TaskCompletionSource Pasted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Count { get; private set; }
         public Task PasteAsync(CancellationToken cancellationToken = default) { Count++; Pasted.TrySetResult(); return Task.CompletedTask; }
+    }
+
+    private sealed class BlockingPasteInsertion : ITextInsertionService
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public async Task PasteAsync(CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+        }
     }
 
     private sealed class FakeInput : IKeyboardInputSimulator

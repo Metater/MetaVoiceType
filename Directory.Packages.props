@@ -11,6 +11,7 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
     <PackageVersion Include="System.CommandLine" Version="2.0.10" />
     <PackageVersion Include="NAudio" Version="2.3.0" />
+    <PackageVersion Include="FftSharp" Version="2.2.0" />
     <PackageVersion Include="Vosk" Version="0.3.38" />
     <PackageVersion Include="org.k2fsa.sherpa.onnx" Version="1.13.5" />
     <PackageVersion Include="NtvLibs.cuda12.cublas.runtime.win-x64" Version="12.8.1" />

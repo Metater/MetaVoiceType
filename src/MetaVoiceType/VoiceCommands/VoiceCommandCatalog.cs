@@ -19,7 +19,8 @@ public sealed record VoiceCommandLanguage(
     IReadOnlyList<string> RequiredFiles,
     string License,
     string RestrictedGrammar,
-    IReadOnlyDictionary<string, string> Commands)
+    IReadOnlyDictionary<string, string> Commands,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? CommandAliases = null)
 {
     public long SizeBytes => ArchiveBytes;
 
@@ -63,6 +64,13 @@ public sealed record VoiceCommandCatalog(int SchemaVersion, string DefaultLangua
             if (!language.ModelName.Contains("small", StringComparison.OrdinalIgnoreCase) && language.Id != "uk")
                 throw new InvalidDataException($"Non-small model is only permitted for Ukrainian ({language.Id}).");
             CommandPhraseValidator.Validate(language.Commands);
+            if (language.CommandAliases is not null)
+                foreach ((string command, IReadOnlyList<string> aliases) in language.CommandAliases)
+                {
+                    if (!VoiceCommandKeys.All.Values.Contains(command, StringComparer.Ordinal))
+                        throw new InvalidDataException($"Unknown command alias key '{command}' for {language.Id}.");
+                    CommandPhraseValidator.ValidateAliases(aliases);
+                }
         }
     }
 }
@@ -81,5 +89,14 @@ public static class CommandPhraseValidator
             if (phrase.Length == 0 || phrase == "[unk]") throw new InvalidDataException("Command phrases cannot be blank or [unk].");
             if (!normalized.Add(phrase)) throw new InvalidDataException("Command phrases must be unique within a language.");
         }
+    }
+
+    public static void ValidateAliases(IEnumerable<string> aliases)
+    {
+        string[] normalized = aliases.Select(Normalize).ToArray();
+        if (normalized.Length == 0 || normalized.Any(x => x.Length == 0 || x == "[unk]"))
+            throw new InvalidDataException("Each command needs at least one non-empty alias.");
+        if (normalized.Distinct(StringComparer.OrdinalIgnoreCase).Count() != normalized.Length)
+            throw new InvalidDataException("Command aliases must be unique.");
     }
 }

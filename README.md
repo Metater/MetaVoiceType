@@ -2,15 +2,19 @@
 
 MetaVoiceType is a local-first Windows dictation app. Vosk listens locally for configurable voice commands; NVIDIA Parakeet transcribes only during recording. Command language and dictation language are independent.
 
-## Windows V1.2
+## Windows V1.3
 
 - Windows 10/11 x64, .NET 10, and Avalonia
 - Self-contained installer; no separate .NET or CUDA Toolkit setup
 - Automatic multilingual dictation with Parakeet TDT 0.6B v3, or English with v2
 - NVIDIA CUDA preferred through the verified Sherpa runtime; automatic CPU fallback
 - System theme by default, with Dark and Light choices
-- Seven editable built-in commands: Start, Continue, Stop, Paste Recording, Cancel Recording, Cancel Paste, and Copy
-- Literal boundary-aware word replacements before history, copy, and paste
+- Multiple spoken aliases for all seven built-ins and custom commands; Paste Recording is primary and Paste Here remains an English alias
+- Grouped, literal boundary-aware word replacements before history, copy, and paste
+- UTC transcript storage with DST-aware Windows local-time display
+- Shared FftSharp speech spectrum in the live card and transparent floating pill
+- Explicit paste lifecycle and paste-only pill state, including paste/new-recording overlap
+- Purple Fluent interaction palette, responsive narrow layout, and internally scrolling live transcript
 - Voice-triggered Program, PowerShell, Command Prompt, and keyboard actions—including single keys such as Enter
 - Generic shortcuts when recording starts/stops, suitable for Discord, OBS, and other apps
 - One-second timestamp-aware pre-roll and lossless managed capture queues
@@ -29,7 +33,7 @@ MetaVoiceType simply plays these shortcuts at recording start and end. It does n
 
 ## Privacy, recovery, and builds
 
-Audio, transcripts, settings, and history stay on this PC. Recovery PCM is removed after its corrected transcript is committed. Existing V1.1 data and downloaded models remain in `%LOCALAPPDATA%\MetaVoiceType` during upgrade.
+Audio, transcripts, settings, and history stay on this PC. Recovery PCM is removed after its corrected transcript is committed. Existing V1.1/V1.2 data and downloaded models remain in `%LOCALAPPDATA%\MetaVoiceType` during upgrade.
 
 ```powershell
 dotnet restore MetaVoiceType.slnx

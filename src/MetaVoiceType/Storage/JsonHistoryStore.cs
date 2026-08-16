@@ -13,12 +13,19 @@ public sealed partial class JsonHistoryStore(AppPaths paths, ILogger<JsonHistory
     public async Task<IReadOnlyList<TranscriptRecord>> LoadAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await LoadUnsafeAsync(cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            IReadOnlyList<TranscriptRecord> records = await LoadUnsafeAsync(cancellationToken).ConfigureAwait(false);
+            if (File.Exists(paths.HistoryFile)) await AtomicJsonFile.WriteAsync(paths.HistoryFile, records, cancellationToken).ConfigureAwait(false);
+            return records;
+        }
         finally { _gate.Release(); }
     }
 
     public async Task AddAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
     {
+        if (string.IsNullOrWhiteSpace(record.Text)) return;
+        record = Normalize(record);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -46,13 +53,21 @@ public sealed partial class JsonHistoryStore(AppPaths paths, ILogger<JsonHistory
         finally { _gate.Release(); }
     }
 
+    public async Task DeleteAllAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { await AtomicJsonFile.WriteAsync(paths.HistoryFile, Array.Empty<TranscriptRecord>(), cancellationToken).ConfigureAwait(false); }
+        finally { _gate.Release(); }
+    }
+
     private async Task<IReadOnlyList<TranscriptRecord>> LoadUnsafeAsync(CancellationToken cancellationToken)
     {
         if (!File.Exists(paths.HistoryFile)) return [];
         try
         {
             await using var stream = File.OpenRead(paths.HistoryFile);
-            return await JsonSerializer.DeserializeAsync<List<TranscriptRecord>>(stream, AtomicJsonFile.Options, cancellationToken).ConfigureAwait(false) ?? [];
+            List<TranscriptRecord> records = await JsonSerializer.DeserializeAsync<List<TranscriptRecord>>(stream, AtomicJsonFile.Options, cancellationToken).ConfigureAwait(false) ?? [];
+            return records.Where(x => !string.IsNullOrWhiteSpace(x.Text)).Select(Normalize).ToArray();
         }
         catch (Exception ex) when (ex is IOException or JsonException)
         {
@@ -60,6 +75,14 @@ public sealed partial class JsonHistoryStore(AppPaths paths, ILogger<JsonHistory
             return [];
         }
     }
+
+    private static TranscriptRecord Normalize(TranscriptRecord record) => record with
+    {
+        StartedAt = record.StartedAt.ToUniversalTime(),
+        StoppedAt = record.StoppedAt.ToUniversalTime(),
+        UpdatedAt = record.UpdatedAt?.ToUniversalTime(),
+        Text = record.Text.Trim()
+    };
 
     public void Dispose() => _gate.Dispose();
 

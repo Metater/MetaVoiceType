@@ -5,6 +5,12 @@ namespace MetaVoiceType.Sessions;
 
 public static class WordReplacementEngine
 {
+    public static string Apply(string text, IEnumerable<WordReplacementGroup> groups) => Apply(text,
+        groups.SelectMany(group => group.Matches.Select(match => new WordReplacement
+        {
+            Id = $"{group.Id}:{match}", Match = match, Replacement = group.Replacement
+        })));
+
     public static string Apply(string text, IEnumerable<WordReplacement> configured)
     {
         if (string.IsNullOrEmpty(text)) return text;
@@ -33,6 +39,12 @@ public static class WordReplacementEngine
     public static void Validate(WordReplacement replacement)
     {
         if (string.IsNullOrWhiteSpace(replacement.Match)) throw new InvalidDataException("Replacement match text cannot be empty.");
+    }
+
+    public static void Validate(WordReplacementGroup group)
+    {
+        if (group.Matches.Count == 0 || group.Matches.Any(string.IsNullOrWhiteSpace))
+            throw new InvalidDataException("Add at least one non-empty match phrase.");
     }
 
     private static bool IsBoundary(string text, int index) => index < 0 || index >= text.Length || !IsWordCharacter(text[index]);

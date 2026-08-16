@@ -4,30 +4,74 @@ using Microsoft.Extensions.Logging;
 namespace MetaVoiceType.Sessions;
 
 public enum PasteRequestResult { Accepted, AlreadyPending, NoText }
+public enum PasteRequestState { Idle, Queued, Preparing, Pasting, Succeeded, Failed, Canceled }
 
 public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextInsertionService insertion, ILogger<PasteCoordinator> logger) : IDisposable
 {
     private readonly SemaphoreSlim _clipboardGate = new(1, 1);
     private readonly object _stateGate = new();
     private CancellationTokenSource? _pending;
-    public bool IsPending { get { lock (_stateGate) return _pending is not null; } }
+    private PasteRequestState _state;
+    public PasteRequestState State { get { lock (_stateGate) return _state; } }
+    public bool IsActive => State is PasteRequestState.Queued or PasteRequestState.Preparing or PasteRequestState.Pasting;
+    public event EventHandler<PasteRequestState>? StateChanged;
 
     public PasteRequestResult Queue(string text, Func<Task>? completed = null)
     {
         if (string.IsNullOrWhiteSpace(text)) return PasteRequestResult.NoText;
-        CancellationTokenSource request;
+        PasteRequestResult reservation = Reserve();
+        if (reservation != PasteRequestResult.Accepted) return reservation;
+        StartReserved(text, completed);
+        return PasteRequestResult.Accepted;
+    }
+
+    public PasteRequestResult Reserve()
+    {
         lock (_stateGate)
         {
             if (_pending is not null) return PasteRequestResult.AlreadyPending;
-            _pending = request = new CancellationTokenSource();
+            _pending = new CancellationTokenSource();
+            _state = PasteRequestState.Queued;
         }
-        _ = ExecuteAsync(text, request, completed);
+        StateChanged?.Invoke(this, PasteRequestState.Queued);
         return PasteRequestResult.Accepted;
+    }
+
+    public void StartReserved(string text, Func<Task>? completed = null)
+    {
+        if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException("Paste text cannot be blank.", nameof(text));
+        CancellationTokenSource request;
+        lock (_stateGate)
+        {
+            request = _pending ?? throw new InvalidOperationException("No paste request is reserved.");
+            if (_state != PasteRequestState.Queued) throw new InvalidOperationException("The paste request already started.");
+            _state = PasteRequestState.Preparing;
+        }
+        StateChanged?.Invoke(this, PasteRequestState.Preparing);
+        _ = ExecuteAsync(text, request, completed);
     }
 
     public void Cancel()
     {
-        lock (_stateGate) _pending?.Cancel();
+        CancellationTokenSource? reserved = null;
+        lock (_stateGate)
+        {
+            if (_pending is null) return;
+            if (_state == PasteRequestState.Queued)
+            {
+                reserved = _pending;
+                _pending = null;
+                _state = PasteRequestState.Canceled;
+            }
+            else _pending.Cancel();
+        }
+        if (reserved is not null)
+        {
+            reserved.Cancel();
+            reserved.Dispose();
+            StateChanged?.Invoke(this, PasteRequestState.Canceled);
+            LogCanceled(logger);
+        }
     }
 
     public async Task CopyAsync(string text, CancellationToken cancellationToken = default)
@@ -48,18 +92,31 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
             {
                 await clipboard.SetTextAsync(exactText, request.Token).ConfigureAwait(false);
                 request.Token.ThrowIfCancellationRequested();
+                SetState(PasteRequestState.Pasting);
                 await insertion.PasteAsync(request.Token).ConfigureAwait(false);
             }
             finally { _clipboardGate.Release(); }
             if (completed is not null) await completed().ConfigureAwait(false);
+            SetState(PasteRequestState.Succeeded);
             LogPasted(logger, clock.Elapsed.TotalMilliseconds, exactText.Length);
         }
-        catch (OperationCanceledException) { LogCanceled(logger); }
-        catch (Exception ex) { LogPasteFailed(logger, ex); }
+        catch (OperationCanceledException) { SetState(PasteRequestState.Canceled); LogCanceled(logger); }
+        catch (Exception ex) { SetState(PasteRequestState.Failed); LogPasteFailed(logger, ex); }
         finally
         {
             lock (_stateGate) { if (ReferenceEquals(_pending, request)) { _pending = null; request.Dispose(); } }
         }
+    }
+
+    public void ResetTerminalState()
+    {
+        if (State is PasteRequestState.Succeeded or PasteRequestState.Failed or PasteRequestState.Canceled) SetState(PasteRequestState.Idle);
+    }
+
+    private void SetState(PasteRequestState state)
+    {
+        lock (_stateGate) _state = state;
+        StateChanged?.Invoke(this, state);
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Paste completed in {ElapsedMs:F1} ms (chars={Characters}).")]
@@ -71,7 +128,7 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
 
     public void Dispose()
     {
-        lock (_stateGate) { _pending?.Cancel(); _pending?.Dispose(); _pending = null; }
+        lock (_stateGate) { _pending?.Cancel(); _pending?.Dispose(); _pending = null; _state = PasteRequestState.Idle; }
         _clipboardGate.Dispose();
     }
 }

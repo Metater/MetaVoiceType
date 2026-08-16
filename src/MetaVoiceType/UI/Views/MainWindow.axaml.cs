@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using MetaVoiceType.Core.Models;
+using MetaVoiceType.UI.ViewModels;
 using System.Diagnostics;
 
 namespace MetaVoiceType.UI.Views;
@@ -9,9 +10,12 @@ namespace MetaVoiceType.UI.Views;
 public sealed partial class MainWindow : Window
 {
     private bool _allowClose;
+    private IDisposable? _spectrumLease;
     public MainWindow()
     {
         InitializeComponent();
+        Opened += (_, _) => _spectrumLease ??= AppServices.TryGet<Audio.AudioSpectrumService>()?.Acquire();
+        SizeChanged += (_, _) => ApplyResponsiveLayout();
         Closing += (_, args) =>
         {
             if (_allowClose) return;
@@ -22,12 +26,22 @@ public sealed partial class MainWindow : Window
                 _ = firstVm.MarkCloseToTrayNoticeShownAsync();
             }
             Hide();
+            _spectrumLease?.Dispose(); _spectrumLease = null;
             if (DataContext is ViewModels.MainViewModel vm) vm.State.StatusMessage = "MetaVoiceType is still listening in the system tray.";
         };
     }
 
+    private void ApplyResponsiveLayout()
+    {
+        bool narrow = Bounds.Width < 820;
+        LiveGrid.ColumnDefinitions = new ColumnDefinitions(narrow ? "*" : "*,300");
+        Grid.SetColumn(CommandCard, narrow ? 0 : 1);
+        Grid.SetRow(CommandCard, narrow ? 1 : 0);
+    }
+
     public void ExitApplication()
     {
+        _spectrumLease?.Dispose(); _spectrumLease = null;
         _allowClose = true;
         if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime lifetime)
             lifetime.TryShutdown();
@@ -47,7 +61,7 @@ public sealed partial class MainWindow : Window
 
     private void DeleteReplacementClicked(object? sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: WordReplacement replacement } && DataContext is ViewModels.MainViewModel vm)
+        if (sender is Button { Tag: ReplacementGroupEditorViewModel replacement } && DataContext is ViewModels.MainViewModel vm)
             vm.DeleteWordReplacementCommand.Execute(replacement);
     }
 
@@ -59,13 +73,16 @@ public sealed partial class MainWindow : Window
 
     private async void WindowKeyDown(object? sender, KeyEventArgs e)
     {
-        if (DataContext is not ViewModels.MainViewModel vm || (!vm.IsCapturingHotkey && !vm.IsCapturingCustomShortcut && !vm.IsCapturingRecordingStartedShortcut && !vm.IsCapturingRecordingStoppedShortcut)) return;
+        if (DataContext is not ViewModels.MainViewModel vm || vm.ActiveShortcutCapture == MainViewModel.ShortcutCaptureTarget.None) return;
         if (e.Key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin) return;
         string gesture = FormatGesture(e);
         e.Handled = true;
-        if (vm.IsCapturingCustomShortcut) vm.CaptureCustomShortcut(gesture);
-        else if (vm.IsCapturingRecordingStartedShortcut || vm.IsCapturingRecordingStoppedShortcut) vm.CaptureRecordingEventShortcut(gesture);
-        else await vm.CaptureHotkeyAsync(gesture);
+        switch (vm.ActiveShortcutCapture)
+        {
+            case MainViewModel.ShortcutCaptureTarget.CustomCommand: vm.CaptureCustomShortcut(gesture); break;
+            case MainViewModel.ShortcutCaptureTarget.RecordingStarted or MainViewModel.ShortcutCaptureTarget.RecordingStopped: vm.CaptureRecordingEventShortcut(gesture); break;
+            case MainViewModel.ShortcutCaptureTarget.RecordingToggle: await vm.CaptureHotkeyAsync(gesture); break;
+        }
     }
 
     private static string FormatGesture(KeyEventArgs e)
@@ -83,6 +100,8 @@ public sealed partial class MainWindow : Window
             Key.Back => "Backspace",
             Key.Prior => "PageUp",
             Key.Next => "PageDown",
+            Key.Scroll => "ScrollLock",
+            Key.Pause => "Pause",
             _ => e.Key.ToString()
         });
         return string.Join('+', parts);

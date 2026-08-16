@@ -23,9 +23,9 @@ public sealed partial class App : Application
             _pillWindow = new PillWindow { DataContext = viewModel };
             viewModel.State.PropertyChanged += (_, args) =>
             {
-                if (args.PropertyName != nameof(viewModel.State.IsRecording) || _pillWindow is null) return;
-                if (viewModel.State.IsRecording && viewModel.ShowFloatingPill) _pillWindow.ShowWithoutActivation();
-                else _pillWindow.Hide();
+                if (args.PropertyName is not (nameof(viewModel.State.IsRecording) or nameof(viewModel.State.PasteState)) || _pillWindow is null) return;
+                if ((viewModel.State.IsRecording || viewModel.State.IsPasteActive) && viewModel.ShowFloatingPill) _pillWindow.ShowWithoutActivation();
+                else _pillWindow.HidePill();
             };
             desktop.MainWindow = window;
             desktop.Exit += async (_, _) =>

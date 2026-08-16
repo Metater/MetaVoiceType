@@ -18,6 +18,7 @@ public sealed partial class SherpaRuntimeBootstrapper
     private bool _configured;
     private string? _gpuLibrary;
     private string? _loadFailure;
+    private bool _userForceCpu;
 
     public SherpaRuntimeBootstrapper(AppPaths paths, StartupOptions options, ILogger<SherpaRuntimeBootstrapper> logger)
     {
@@ -26,7 +27,8 @@ public sealed partial class SherpaRuntimeBootstrapper
         _logger = logger;
     }
 
-    public bool ForceCpu => _options.ForceCpu;
+    public bool ForceCpu => _options.ForceCpu || _userForceCpu;
+    public void SetUserForceCpu(bool value) { lock (_gate) _userForceCpu = value; }
     public bool CudaRuntimeSelected { get; private set; }
     public string? GpuName { get; private set; }
     public string? RuntimeFailure => _loadFailure;
@@ -44,7 +46,7 @@ public sealed partial class SherpaRuntimeBootstrapper
             _configured = true;
             if (ForceCpu)
             {
-                _loadFailure = "CPU was forced by diagnostics.";
+                _loadFailure = _options.ForceCpu ? "CPU was forced by diagnostics." : "CPU-only mode is enabled in Settings.";
                 return false;
             }
 

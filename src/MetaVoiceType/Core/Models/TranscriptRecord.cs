@@ -18,4 +18,8 @@ public sealed record TranscriptRecord(
     double TotalDurationSeconds = 0)
 {
     public string LogicalId => string.IsNullOrWhiteSpace(LogicalTranscriptId) ? SessionId : LogicalTranscriptId;
+    public DateTimeOffset StartedAtUtc => StartedAt.ToUniversalTime();
+    public DateTimeOffset StoppedAtUtc => StoppedAt.ToUniversalTime();
+    public DateTimeOffset? UpdatedAtUtc => UpdatedAt?.ToUniversalTime();
+    public string LocalTimeDisplay => MetaVoiceType.Storage.TranscriptTimeFormatter.Format(StartedAtUtc);
 }
