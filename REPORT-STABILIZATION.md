@@ -6,9 +6,9 @@ Settings schema: 5
 
 ## Status
 
-The local build, tests, clean onboarding, restart, degraded recovery, Vosk activation, release-decision logic, self-contained publish, and Velopack packaging are green. V1.3 UI/polish work was not resumed.
+The local build, tests, clean onboarding, restart, degraded recovery, Vosk activation, release-decision logic, self-contained publish, Velopack packaging, hosted CI, and hosted release workflow are green. Public release [`v1.3.0`](https://github.com/Metater/MetaVoiceType/releases/tag/v1.3.0) was published from corrected tagged commit `cd60e6b977c0b40ac6531c099d92de4b70b43068`. V1.3 UI/polish work was not resumed during this pass.
 
-The remaining external gate is a hosted GitHub Actions run. The public repository currently has no `v1.3.0` release, so pushing these changes to `main` would intentionally run the release workflow and create a public release. That external mutation was not performed without explicit authorization. It is not yet safe to resume V1.3 polish until that hosted CI/release run is green.
+The emergency stabilization pass is a PASS. There are no remaining stabilization blockers. It is safe to resume separately scoped V1.3 polish work after this pass ends.
 
 ## Root causes and fixes
 
@@ -55,6 +55,8 @@ The old `.github/workflows/release.yml` ran `gh release view` for the target tag
 
 The workflow now supplies `GH_TOKEN: ${{ github.token }}` and calls `scripts/Get-ReleaseDecision.ps1`. The script reads the declared version, queries release tags with `gh release list --json tagName --limit 1000`, emits `version`, `tag`, `releaseExists`, and `shouldRelease`, and distinguishes an authentication/query failure from a genuinely absent release. Tests cover an existing tag, missing tag, missing version, and failed/authenticated GitHub CLI query. CI runs those tests before publish, and the release workflow runs them before deciding whether to package.
 
+The first hosted stabilization attempt exposed one additional PowerShell-runner issue: the test intentionally invoked a fake failing `gh`, caught and asserted the expected failure, and printed that all tests passed, but left the native `$LASTEXITCODE` nonzero. GitHub's `pwsh` wrapper propagated that stale code. The successful-test path now clears only that expected fixture code; real uncaught script or GitHub failures still fail loudly. Corrected hosted [CI run `31930205274`](https://github.com/Metater/MetaVoiceType/actions/runs/31930205274) and [release run `31930205297`](https://github.com/Metater/MetaVoiceType/actions/runs/31930205297) both completed successfully.
+
 References: [GitHub CLI `gh release list`](https://cli.github.com/manual/gh_release_list) and [GitHub CLI in Actions authentication](https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-github-cli).
 
 ## Automated verification
@@ -96,8 +98,8 @@ The local artifacts are under `artifacts/releases`. The setup package was produc
 - `MetaVoiceType-win-Portable.zip` — SHA-256 `2EB4369139616FCA9F9CB02214F337933D9736590A44A1F08E1EED2DA1CABB92`
 - `MetaVoiceType-win-Setup.exe` — SHA-256 `CD1BF634E7F8ADA07206BAE7F6888EEA2DA007218242F390EAC50FC93FAD5981`
 
-## Remaining external gate
+## Hosted verification and remaining blockers
 
-The release-decision script correctly fails loudly when `gh` is unavailable or authentication/querying fails. A fresh public GitHub API query on 2026-08-16 showed `v1.1.0` as the only existing release and no `v1.3.0`. Therefore the next push to `main` is expected to exercise the release path and publish `v1.3.0`; it is not a harmless CI-only verification.
+The release-decision script still fails loudly when `gh` is unavailable or authentication/querying fails. Hosted CI and versioned release automation completed successfully for the corrected commit. The public release is non-draft, non-prerelease, and contains all six expected Velopack metadata/package/setup assets.
 
-Do not resume V1.3 polish until both the hosted CI workflow and the versioned release workflow complete successfully for these changes.
+There are no remaining blockers for this stabilization pass. The existing package flow does not configure code signing, so GitHub's published installer remains unsigned; this is recorded as a packaging limitation rather than a stabilization failure.
