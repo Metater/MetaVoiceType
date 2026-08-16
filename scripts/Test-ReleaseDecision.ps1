@@ -41,3 +41,8 @@ finally {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 }
+
+# GitHub's pwsh wrapper exits with the last native process code even when an
+# expected failure was caught and all assertions passed. Do not leak the fake
+# gh fixture's exit code into the workflow step.
+$global:LASTEXITCODE = 0
