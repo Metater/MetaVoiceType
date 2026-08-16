@@ -37,6 +37,33 @@ public sealed class StorageTests : IDisposable
     }
 
     [Fact]
+    public async Task V11JsonMigratesWithoutLosingThemeHotkeyCommandsOrCustomActions()
+    {
+        var paths = new AppPaths(_root);
+        Directory.CreateDirectory(_root);
+        const string json = """
+            {
+              "schemaVersion": 1,
+              "onboardingComplete": true,
+              "theme": 0,
+              "toggleHotkey": "Ctrl+Alt+K",
+              "muteDiscordWhileRecording": true,
+              "commandOverrides": { "en-us": { "pasteHere": "put it there" } },
+              "customCommands": [ { "id": "one", "name": "Enter", "voiceCommandLanguageId": "en-us", "phrase": "enter", "commandType": 3, "shortcut": "Enter" } ]
+            }
+            """;
+        await File.WriteAllTextAsync(paths.SettingsFile, json, TestContext.Current.CancellationToken);
+        var store = new JsonSettingsStore(paths, NullLogger<JsonSettingsStore>.Instance);
+        AppSettings loaded = await store.LoadAsync(TestContext.Current.CancellationToken);
+        Assert.Equal(3, loaded.SchemaVersion);
+        Assert.Equal(AppTheme.Dark, loaded.Theme);
+        Assert.Equal("Ctrl+Alt+K", loaded.ToggleHotkey);
+        Assert.Equal("put it there", loaded.CommandOverrides["en-us"]["pasteHere"]);
+        Assert.Equal("Enter", Assert.Single(loaded.CustomCommands).Shortcut);
+        Assert.Empty(loaded.WordReplacements);
+    }
+
+    [Fact]
     public async Task AtomicWriteLeavesNoTemporaryFiles()
     {
         var paths = new AppPaths(_root);

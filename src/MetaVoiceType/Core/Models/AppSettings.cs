@@ -5,6 +5,13 @@ public enum DictationMode { Automatic, English }
 public enum CustomCommandType { Program, PowerShell, CommandPrompt, KeyboardShortcut }
 public enum CommandWindowMode { Normal, Minimized, Hidden }
 
+public sealed class WordReplacement
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Match { get; set; } = "";
+    public string Replacement { get; set; } = "";
+}
+
 public sealed class CustomVoiceCommand
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -23,11 +30,11 @@ public sealed class CustomVoiceCommand
 
 public sealed record AppSettings
 {
-    public int SchemaVersion { get; init; } = 2;
+    public int SchemaVersion { get; init; } = 3;
     public bool OnboardingComplete { get; init; }
     public bool StartWithWindows { get; init; }
     public bool CheckForUpdates { get; init; } = true;
-    public AppTheme Theme { get; init; } = AppTheme.Dark;
+    public AppTheme Theme { get; init; } = AppTheme.System;
     public string VoiceCommandLanguage { get; init; } = "en-us";
     public DictationMode DictationMode { get; init; } = DictationMode.Automatic;
     public string? AudioDeviceId { get; init; }
@@ -35,9 +42,10 @@ public sealed record AppSettings
     public bool ShowFloatingPill { get; init; } = true;
     public double CueVolume { get; init; } = 0.6;
     public string ToggleHotkey { get; init; } = "Ctrl+Space";
-    public bool MuteDiscordWhileRecording { get; init; }
-    public string? DiscordClientId { get; init; }
+    public string? RecordingStartedShortcut { get; init; }
+    public string? RecordingStoppedShortcut { get; init; }
     public bool CloseToTrayNoticeShown { get; init; }
     public Dictionary<string, Dictionary<string, string>> CommandOverrides { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public List<CustomVoiceCommand> CustomCommands { get; init; } = [];
+    public List<WordReplacement> WordReplacements { get; init; } = [];
 }

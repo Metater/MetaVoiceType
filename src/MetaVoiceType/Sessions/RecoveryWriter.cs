@@ -7,11 +7,14 @@ using Microsoft.Extensions.Logging;
 
 namespace MetaVoiceType.Sessions;
 
-public sealed record RecoveryMetadata(string SessionId, string Language, DateTimeOffset StartedAt, long SamplesWritten, string State);
+public sealed record RecoveryMetadata(string SessionId, string Language, DateTimeOffset StartedAt, long SamplesWritten, string State,
+    string? LogicalTranscriptId = null, string? PreviousText = null, int PriorSegmentCount = 0, double PriorDurationSeconds = 0,
+    DateTimeOffset? LogicalStartedAt = null);
 
 public sealed partial class RecoveryWriter(AppPaths paths, ILogger<RecoveryWriter> logger) : IAsyncDisposable
 {
-    private sealed record Work(string SessionId, string Language, AudioFrame? Frame, bool Close, TaskCompletionSource? Completion = null);
+    private sealed record Work(string SessionId, string Language, DateTimeOffset StartedAt, DateTimeOffset LogicalStartedAt, string LogicalTranscriptId,
+        string PreviousText, int PriorSegmentCount, double PriorDurationSeconds, AudioFrame? Frame, bool Close, TaskCompletionSource? Completion = null);
     private sealed class OpenState(FileStream stream, RecoveryMetadata metadata)
     {
         public FileStream Stream { get; } = stream;
@@ -23,22 +26,36 @@ public sealed partial class RecoveryWriter(AppPaths paths, ILogger<RecoveryWrite
     private Task? _activeWorker;
     private readonly ConcurrentDictionary<string, TaskCompletionSource> _pendingCloses = new(StringComparer.Ordinal);
     private int _depth;
+    private int _maxDepth;
     public int QueueDepth => Volatile.Read(ref _depth);
+    public int MaxQueueDepth => Volatile.Read(ref _maxDepth);
 
     public void Start() { paths.EnsureCreated(); _activeWorker ??= Task.Run(() => RunAsync(_lifetime.Token)); }
-    public void Enqueue(DictationSession session, AudioFrame frame) { if (_queue.Writer.TryWrite(new(session.Id, session.Language, frame, false))) Interlocked.Increment(ref _depth); }
+    public void Enqueue(DictationSession session, AudioFrame frame) { if (_queue.Writer.TryWrite(CreateWork(session, frame, false))) UpdateDepth(); }
     public Task CloseAsync(DictationSession session)
     {
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         if (_activeWorker?.IsCompleted == true) completion.SetException(new InvalidOperationException("The recovery writer stopped unexpectedly."));
         else if (!_pendingCloses.TryAdd(session.Id, completion)) completion.SetException(new InvalidOperationException("This recovery session is already closing."));
-        else if (_queue.Writer.TryWrite(new(session.Id, session.Language, null, true, completion))) Interlocked.Increment(ref _depth);
+        else if (_queue.Writer.TryWrite(CreateWork(session, null, true, completion))) UpdateDepth();
         else
         {
             _pendingCloses.TryRemove(session.Id, out _);
             completion.SetException(new InvalidOperationException("The recovery writer is no longer accepting work."));
         }
         return completion.Task;
+    }
+
+    private void UpdateDepth()
+    {
+        int depth = Interlocked.Increment(ref _depth);
+        int maximum = Volatile.Read(ref _maxDepth);
+        while (depth > maximum)
+        {
+            int found = Interlocked.CompareExchange(ref _maxDepth, depth, maximum);
+            if (found == maximum) return;
+            maximum = found;
+        }
     }
 
     private async Task RunAsync(CancellationToken cancellationToken)
@@ -54,7 +71,8 @@ public sealed partial class RecoveryWriter(AppPaths paths, ILogger<RecoveryWrite
                     string directory = Path.Combine(paths.Recovery, work.SessionId);
                     Directory.CreateDirectory(directory);
                     var stream = new FileStream(Path.Combine(directory, "audio.pcm"), FileMode.Append, FileAccess.Write, FileShare.Read, 64 * 1024, true);
-                    state = new(stream, new(work.SessionId, work.Language, DateTimeOffset.UtcNow, stream.Length / 2, "recording"));
+                    state = new(stream, new(work.SessionId, work.Language, work.StartedAt, stream.Length / 2, "recording",
+                        work.LogicalTranscriptId, work.PreviousText, work.PriorSegmentCount, work.PriorDurationSeconds, work.LogicalStartedAt));
                     open.Add(work.SessionId, state);
                     await WriteMetadataAsync(directory, state.Metadata, cancellationToken).ConfigureAwait(false);
                 }
@@ -98,6 +116,10 @@ public sealed partial class RecoveryWriter(AppPaths paths, ILogger<RecoveryWrite
 
     private static Task WriteMetadataAsync(string directory, RecoveryMetadata metadata, CancellationToken cancellationToken) =>
         AtomicJsonFile.WriteAsync(Path.Combine(directory, "session.json"), metadata, cancellationToken);
+
+    private static Work CreateWork(DictationSession session, AudioFrame? frame, bool close, TaskCompletionSource? completion = null) =>
+        new(session.Id, session.Language, session.StartedAt, session.LogicalStartedAt, session.LogicalTranscriptId, session.PreviousText,
+            session.PriorSegmentCount, session.PriorDurationSeconds, frame, close, completion);
 
     public IEnumerable<string> Discover() => Directory.Exists(paths.Recovery) ? Directory.EnumerateDirectories(paths.Recovery).Where(x => File.Exists(Path.Combine(x, "audio.pcm"))) : [];
     public void Delete(string sessionId) { string directory = Path.Combine(paths.Recovery, sessionId); if (Directory.Exists(directory)) Directory.Delete(directory, true); }

@@ -20,13 +20,9 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
         try
         {
             Directory.CreateDirectory(work);
-            await DownloadAsync(request.ArchiveUrl, archive, progress, cancellationToken).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(request.ArchiveSha256))
-            {
-                progress?.Report(new("Verifying", new FileInfo(archive).Length, request.EstimatedDownloadBytes, 0));
-                await VerifySha256Async(archive, request.ArchiveSha256, cancellationToken).ConfigureAwait(false);
-            }
-            else LogNoDigest(logger, request.ExpectedDirectory);
+            await DownloadAsync(request.ArchiveUrl, archive, request.ExpectedBytes, progress, cancellationToken).ConfigureAwait(false);
+            progress?.Report(new("Verifying", new FileInfo(archive).Length, request.ExpectedBytes, 0));
+            await VerifySha256Async(archive, request.ArchiveSha256!, cancellationToken).ConfigureAwait(false);
             progress?.Report(new("Extracting", new FileInfo(archive).Length, new FileInfo(archive).Length, 0));
             if (request.ArchiveType.Equals("zip", StringComparison.OrdinalIgnoreCase)) await ExtractZipAsync(archive, work, cancellationToken).ConfigureAwait(false);
             else if (request.ArchiveType.Equals("tar.bz2", StringComparison.OrdinalIgnoreCase)) await ExtractArchiveAsync(archive, work, cancellationToken).ConfigureAwait(false);
@@ -73,7 +69,8 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
 
     private static void ValidateRequest(ModelInstallRequest request)
     {
-        if (request.ArchiveSha256 is { Length: > 0 } digest && (digest.Length != 64 || digest.Any(x => !Uri.IsHexDigit(x)))) throw new ArgumentException("SHA-256 metadata is malformed.", nameof(request));
+        if (request.ArchiveSha256 is not { Length: 64 } digest || digest.Any(x => !Uri.IsHexDigit(x))) throw new ArgumentException("A valid SHA-256 pin is required.", nameof(request));
+        if (request.ExpectedBytes is not > 0) throw new ArgumentException("A positive expected byte count is required.", nameof(request));
         if (request.RequiredFiles.Count == 0 || request.RequiredFiles.Any(Path.IsPathRooted)) throw new ArgumentException("Relative required files are required.", nameof(request));
     }
 
@@ -87,11 +84,14 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
         if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException($"Archive SHA-256 mismatch. Expected {expected}, got {actual}.");
     }
 
-    private async Task DownloadAsync(Uri url, string path, IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken)
+    private async Task DownloadAsync(Uri url, string path, long? expectedBytes, IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken)
     {
         using HttpResponseMessage response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        long? total = response.Content.Headers.ContentLength;
+        long? responseBytes = response.Content.Headers.ContentLength;
+        if (expectedBytes is > 0 && responseBytes is > 0 && expectedBytes != responseBytes)
+            throw new InvalidDataException($"Download size metadata mismatch ({responseBytes}/{expectedBytes} bytes).");
+        long? total = expectedBytes is > 0 ? expectedBytes : responseBytes;
         await using Stream input = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
         await using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 128 * 1024, true);
         byte[] buffer = new byte[128 * 1024];
@@ -156,6 +156,4 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Installed model {ModelName}.")]
     private static partial void LogInstalled(ILogger logger, string modelName);
-    [LoggerMessage(Level = LogLevel.Warning, Message = "Model {ModelName} has no publisher SHA-256; archive structure and required files will be validated.")]
-    private static partial void LogNoDigest(ILogger logger, string modelName);
 }

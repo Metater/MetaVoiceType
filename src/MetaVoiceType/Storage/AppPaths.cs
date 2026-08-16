@@ -4,7 +4,8 @@ public sealed class AppPaths
 {
     public AppPaths(string? root = null)
     {
-        Root = root ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MetaVoiceType");
+        Root = root ?? Environment.GetEnvironmentVariable("METAVOICETYPE_DATA_ROOT")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MetaVoiceType");
     }
 
     public string Root { get; }

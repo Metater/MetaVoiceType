@@ -2,6 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using MetaVoiceType.Core.Models;
+using System.Diagnostics;
 
 namespace MetaVoiceType.UI.Views;
 
@@ -38,19 +39,32 @@ public sealed partial class MainWindow : Window
             vm.CopyHistoryCommand.Execute(record);
     }
 
-    private void PasteHistoryClicked(object? sender, RoutedEventArgs e)
+    private void DeleteHistoryClicked(object? sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: TranscriptRecord record } && DataContext is ViewModels.MainViewModel vm)
-            vm.PasteHistoryCommand.Execute(record);
+            vm.RequestDeleteHistoryCommand.Execute(record);
+    }
+
+    private void DeleteReplacementClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: WordReplacement replacement } && DataContext is ViewModels.MainViewModel vm)
+            vm.DeleteWordReplacementCommand.Execute(replacement);
+    }
+
+    private void OpenLinkClicked(object? sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string url } && Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) && uri.Scheme == Uri.UriSchemeHttps)
+            Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
     }
 
     private async void WindowKeyDown(object? sender, KeyEventArgs e)
     {
-        if (DataContext is not ViewModels.MainViewModel vm || (!vm.IsCapturingHotkey && !vm.IsCapturingCustomShortcut)) return;
+        if (DataContext is not ViewModels.MainViewModel vm || (!vm.IsCapturingHotkey && !vm.IsCapturingCustomShortcut && !vm.IsCapturingRecordingStartedShortcut && !vm.IsCapturingRecordingStoppedShortcut)) return;
         if (e.Key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin) return;
         string gesture = FormatGesture(e);
         e.Handled = true;
         if (vm.IsCapturingCustomShortcut) vm.CaptureCustomShortcut(gesture);
+        else if (vm.IsCapturingRecordingStartedShortcut || vm.IsCapturingRecordingStoppedShortcut) vm.CaptureRecordingEventShortcut(gesture);
         else await vm.CaptureHotkeyAsync(gesture);
     }
 
@@ -63,8 +77,13 @@ public sealed partial class MainWindow : Window
         if (e.KeyModifiers.HasFlag(KeyModifiers.Meta)) parts.Add("Win");
         parts.Add(e.Key switch
         {
-            Key.Space => "Space", Key.Return => "Enter", Key.Escape => "Escape", Key.Back => "Backspace",
-            Key.Prior => "PageUp", Key.Next => "PageDown", _ => e.Key.ToString()
+            Key.Space => "Space",
+            Key.Return => "Enter",
+            Key.Escape => "Escape",
+            Key.Back => "Backspace",
+            Key.Prior => "PageUp",
+            Key.Next => "PageDown",
+            _ => e.Key.ToString()
         });
         return string.Join('+', parts);
     }

@@ -23,9 +23,24 @@ public sealed partial class JsonHistoryStore(AppPaths paths, ILogger<JsonHistory
         try
         {
             var records = (await LoadUnsafeAsync(cancellationToken).ConfigureAwait(false)).ToList();
+            int existing = records.FindIndex(x => x.LogicalId.Equals(record.LogicalId, StringComparison.Ordinal));
+            if (existing >= 0) records.RemoveAt(existing);
             records.Insert(0, record);
             if (records.Count > Retention)
                 records.RemoveRange(Retention, records.Count - Retention);
+            await AtomicJsonFile.WriteAsync(paths.HistoryFile, records, cancellationToken).ConfigureAwait(false);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task DeleteAsync(string logicalTranscriptId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logicalTranscriptId);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var records = (await LoadUnsafeAsync(cancellationToken).ConfigureAwait(false)).Where(x =>
+                !x.LogicalId.Equals(logicalTranscriptId, StringComparison.Ordinal)).ToList();
             await AtomicJsonFile.WriteAsync(paths.HistoryFile, records, cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }

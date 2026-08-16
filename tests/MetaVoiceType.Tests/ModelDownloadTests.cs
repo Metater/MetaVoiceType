@@ -34,7 +34,7 @@ public sealed class ModelDownloadTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(() => Service(valid).InstallAsync(badHash, cancellationToken: TestContext.Current.CancellationToken));
 
         byte[] traversal = Zip(("../escaped.txt", "no"), ("model/am/final.mdl", "model"));
-        var unsafeArchive = badHash with { ArchiveSha256 = Convert.ToHexStringLower(SHA256.HashData(traversal)), EstimatedDownloadBytes = traversal.Length };
+        var unsafeArchive = badHash with { ArchiveSha256 = Convert.ToHexStringLower(SHA256.HashData(traversal)), ExpectedBytes = traversal.Length };
         await Assert.ThrowsAsync<InvalidDataException>(() => Service(traversal).InstallAsync(unsafeArchive, cancellationToken: TestContext.Current.CancellationToken));
 
         Assert.False(File.Exists(Path.Combine(Directory.GetParent(_root)!.FullName, "escaped.txt")));

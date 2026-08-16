@@ -11,4 +11,11 @@ public sealed record TranscriptRecord(
     string Text,
     bool Canceled,
     bool Copied,
-    bool Pasted);
+    bool Pasted,
+    string? LogicalTranscriptId = null,
+    DateTimeOffset? UpdatedAt = null,
+    int SegmentCount = 1,
+    double TotalDurationSeconds = 0)
+{
+    public string LogicalId => string.IsNullOrWhiteSpace(LogicalTranscriptId) ? SessionId : LogicalTranscriptId;
+}

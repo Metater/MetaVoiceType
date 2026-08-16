@@ -29,11 +29,15 @@ public sealed record ModelArtifact(
     string Id,
     string Kind,
     string DisplayName,
+    string Repository,
+    string ReleaseTag,
+    string AssetName,
+    long AssetId,
     Uri ArchiveUrl,
     string ArchiveType,
     string ExpectedDirectory,
     string ArchiveSha256,
-    long EstimatedDownloadBytes,
+    long ArchiveBytes,
     IReadOnlyList<string> RequiredFiles,
     string License,
     Uri LicenseUrl,
@@ -45,13 +49,17 @@ public sealed record ModelArtifact(
     {
         if (string.IsNullOrWhiteSpace(Id) || !Id.All(x => char.IsAsciiLetterOrDigit(x) || x is '-' or '_'))
             throw new InvalidDataException("A model artifact id is malformed.");
+        if (string.IsNullOrWhiteSpace(Repository) || string.IsNullOrWhiteSpace(ReleaseTag) || string.IsNullOrWhiteSpace(AssetName) || AssetId <= 0)
+            throw new InvalidDataException($"Artifact '{Id}' release pin is incomplete.");
+        if (!ArchiveUrl.AbsolutePath.EndsWith('/' + AssetName, StringComparison.Ordinal))
+            throw new InvalidDataException($"Artifact '{Id}' asset name does not match its URL.");
         if (!ModelArtifactKinds.All.Contains(Kind)) throw new InvalidDataException($"Artifact '{Id}' has unsupported kind '{Kind}'.");
         if (!ArchiveUrl.IsAbsoluteUri || ArchiveUrl.Scheme != Uri.UriSchemeHttps) throw new InvalidDataException($"Artifact '{Id}' must use an HTTPS URL.");
         if (ArchiveType is not ("tar.bz2" or "zip" or "file")) throw new InvalidDataException($"Artifact '{Id}' has unsupported archive type '{ArchiveType}'.");
         if (Path.IsPathRooted(ExpectedDirectory) || ExpectedDirectory.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || ExpectedDirectory is "." or "..")
             throw new InvalidDataException($"Artifact '{Id}' has an unsafe expected directory.");
         if (ArchiveSha256.Length != 64 || ArchiveSha256.Any(x => !Uri.IsHexDigit(x))) throw new InvalidDataException($"Artifact '{Id}' SHA-256 is malformed.");
-        if (EstimatedDownloadBytes <= 0) throw new InvalidDataException($"Artifact '{Id}' download size is missing.");
+        if (ArchiveBytes <= 0) throw new InvalidDataException($"Artifact '{Id}' download size is missing.");
         if (RequiredFiles.Count == 0 || RequiredFiles.Any(string.IsNullOrWhiteSpace) || RequiredFiles.Any(Path.IsPathRooted))
             throw new InvalidDataException($"Artifact '{Id}' required files are incomplete.");
         if (string.IsNullOrWhiteSpace(License) || !LicenseUrl.IsAbsoluteUri) throw new InvalidDataException($"Artifact '{Id}' license metadata is incomplete.");
@@ -69,7 +77,7 @@ public sealed record ModelArtifact(
     }
 
     public Core.Interfaces.ModelInstallRequest ToInstallRequest(string destinationRoot) =>
-        new(ArchiveUrl, ArchiveType, ExpectedDirectory, destinationRoot, ArchiveSha256, EstimatedDownloadBytes, RequiredFiles);
+        new(ArchiveUrl, ArchiveType, ExpectedDirectory, destinationRoot, ArchiveSha256, ArchiveBytes, RequiredFiles);
 }
 
 public sealed record ModelCatalog(int SchemaVersion, IReadOnlyList<ModelArtifact> Artifacts)

@@ -1,24 +1,32 @@
 # Testing
 
 ```powershell
-dotnet test MetaVoiceType.slnx -c Release
+dotnet restore MetaVoiceType.slnx
+dotnet build MetaVoiceType.slnx -c Release --no-restore
+dotnet test MetaVoiceType.slnx -c Release --no-build --no-restore
 ```
 
-The 36 deterministic tests cover catalogs, exact language exposure, timestamp mapping, confidence independence, Unicode fallback, custom commands, hotkeys, Discord prior-state/overlap behavior, PCM, VAD segment ordering, command-audio exclusion, Stop→Paste during blocked finalization, new-session overlap, recovery ordering, exact paste/copy, atomic storage, safe downloads, managed-only policy, XAML construction, and a headless mandatory Continue click.
+The deterministic suite covers model pins and safe downloads, exact byte/hash rejection, Vosk timestamp matching without confidence decisions, twelve-language-command completeness, Unicode grammar fallback, literal replacement boundaries/order/case, empty replacement rejection, single-key and modified shortcut sequences, exactly-once recording events, sample-aligned pre-roll joins, logical continuation/upsert/delete, V1.1 settings migration, command suppression, Stop→Paste races, overlapping sessions, recovery ordering, managed-only policy, and Avalonia construction.
 
 ## Windows diagnostics
 
 ```powershell
-dotnet run --project src/MetaVoiceType/MetaVoiceType.csproj -- --self-test
+dotnet run --project src/MetaVoiceType/MetaVoiceType.csproj -c Release -- --self-test
 ```
 
 - `--install-models --dictation-language auto|en --command-language ID`
 - `--audio-file PATH [--test-command]`
 - `--force-cpu`
 - `--list-audio-devices`
-- `--stress-minutes N`
+- `--stress-minutes 20`
 - `--paste-text TEXT`
 - `--recovery-crash-seconds N`
 - `--reset-onboarding`
 
-V1 evidence includes two physical WASAPI devices; real v2/v3 CUDA initialization on an RTX 4060 Laptop GPU; exact GPU and forced-CPU transcription of a generated WAV; English Vosk command emission; safe hashes/extraction; Release tests; visual first-run/main/pill inspection; and final Velopack creation. Longer unattended stress, cross-application paste, tray/startup, and Discord-authorized-account checks remain useful owner smoke tests.
+The stress command streams a real microphone through Vosk, Parakeet, Silero VAD, and recovery I/O. Each minute reports `FramesCaptured`, `FramesDispatched`, `FramesDropped`, capture/Parakeet/recovery queue depths and high-water marks, memory, and final GPU provider. Normal acceptance requires zero dropped frames and drained queues.
+
+For isolated onboarding/visual QA, set `METAVOICETYPE_DATA_ROOT` to a temporary directory; production defaults remain `%LOCALAPPDATA%\MetaVoiceType`.
+
+## Manual V1.2 checklist
+
+Inspect onboarding and main/settings/history/dialog/pill states under System, Dark, and Light. Exercise active-language command copy, a fresh Vosk switch with visible byte progress, Parakeet V2/V3 GPU and forced CPU, immediate speech after Start/Continue, Stop/Paste/Cancel, repeated continuation and recovery, replacements, every custom action type, Enter and a modified key action, start/stop event shortcuts, Recent Copy/Delete, all four pill buttons, tray/clean exit, update progress, and a clean installer upgrade.

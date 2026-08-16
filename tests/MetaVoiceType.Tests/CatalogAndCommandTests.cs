@@ -38,7 +38,9 @@ public sealed class CatalogAndCommandTests
         Assert.Equal("auto", v3.DefaultLanguage);
         Assert.Equal("CC-BY-4.0", v3.License);
         Assert.Equal("5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf", v3.ArchiveSha256);
-        Assert.Equal(487170055, v3.EstimatedDownloadBytes);
+        Assert.Equal(487170055, v3.ArchiveBytes);
+        Assert.Equal(283097583, v3.AssetId);
+        Assert.Equal("asr-models", v3.ReleaseTag);
         Assert.True(v3.Capabilities!.AutomaticLanguageDetection);
         Assert.Equal(25, v3.Capabilities.Languages!.Count);
         Assert.Equal(["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"], v3.RequiredFiles);
@@ -46,6 +48,12 @@ public sealed class CatalogAndCommandTests
         Assert.DoesNotContain("nemotron", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\"acceleration\"", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("\"provider\"", json, StringComparison.OrdinalIgnoreCase);
+        Assert.All(VoiceCommandCatalog.LoadBundled().Languages, language =>
+        {
+            Assert.Equal(64, language.ArchiveSha256.Length);
+            Assert.True(language.ArchiveBytes > 0);
+            Assert.Contains("continueRecording", language.Commands.Keys);
+        });
     }
 
     [Fact]

@@ -17,8 +17,9 @@ public sealed partial class JsonSettingsStore(AppPaths paths, ILogger<JsonSettin
             if (!File.Exists(paths.SettingsFile))
                 return new AppSettings();
             await using var stream = File.OpenRead(paths.SettingsFile);
-            return await JsonSerializer.DeserializeAsync<AppSettings>(stream, AtomicJsonFile.Options, cancellationToken).ConfigureAwait(false)
+            AppSettings loaded = await JsonSerializer.DeserializeAsync<AppSettings>(stream, AtomicJsonFile.Options, cancellationToken).ConfigureAwait(false)
                 ?? new AppSettings();
+            return Migrate(loaded);
         }
         catch (Exception ex) when (ex is JsonException or IOException)
         {
@@ -27,6 +28,14 @@ public sealed partial class JsonSettingsStore(AppPaths paths, ILogger<JsonSettin
         }
         finally { _gate.Release(); }
     }
+
+    internal static AppSettings Migrate(AppSettings settings) => settings with
+    {
+        SchemaVersion = 3,
+        CommandOverrides = settings.CommandOverrides ?? new(StringComparer.OrdinalIgnoreCase),
+        CustomCommands = settings.CustomCommands ?? [],
+        WordReplacements = settings.WordReplacements ?? []
+    };
 
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {

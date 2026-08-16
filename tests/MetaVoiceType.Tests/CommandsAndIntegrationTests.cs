@@ -1,6 +1,5 @@
 using MetaVoiceType.Core.Interfaces;
 using MetaVoiceType.Core.Models;
-using MetaVoiceType.Integrations;
 using MetaVoiceType.VoiceCommands;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -49,49 +48,21 @@ public sealed class CommandsAndIntegrationTests
     {
         var input = new FakeInput();
         var executor = new CustomCommandExecutor(input, NullLogger<CustomCommandExecutor>.Instance);
-        var program = new CustomVoiceCommand { Id = "program", Name = "Program", Phrase = "run program", CommandType = CustomCommandType.Program,
-            Executable = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe", Arguments = "/D /C echo program-ok" };
+        var program = new CustomVoiceCommand
+        {
+            Id = "program",
+            Name = "Program",
+            Phrase = "run program",
+            CommandType = CustomCommandType.Program,
+            Executable = Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe",
+            Arguments = "/D /C echo program-ok"
+        };
         CustomCommandExecution process = await executor.ExecuteAsync(program, true, TestContext.Current.CancellationToken);
         Assert.Contains("program-ok", process.StandardOutput, StringComparison.OrdinalIgnoreCase);
 
         var shortcut = new CustomVoiceCommand { Id = "shortcut", Name = "Shortcut", Phrase = "send shortcut", CommandType = CustomCommandType.KeyboardShortcut, Shortcut = "Ctrl+Shift+K" };
         await executor.ExecuteAsync(shortcut, cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("Ctrl+Shift+K", input.Last?.ToString());
-    }
-
-    [Fact]
-    public async Task DiscordMuteSpansOverlappingSessionTransitionsAndPreservesPriorMute()
-    {
-        var discord = new FakeDiscord();
-        using var coordinator = new DiscordAutoMuteCoordinator(discord, NullLogger<DiscordAutoMuteCoordinator>.Instance);
-        CancellationToken token = TestContext.Current.CancellationToken;
-        await coordinator.RecordingStartedAsync("a", true, token);
-        await coordinator.RecordingStartedAsync("b", true, token);
-        await coordinator.RecordingEndedAsync("a", token);
-        Assert.True(discord.Muted);
-        await coordinator.RecordingEndedAsync("b", token);
-        Assert.False(discord.Muted);
-        Assert.Equal([true, false], discord.Changes);
-
-        discord.Muted = true;
-        await coordinator.RecordingStartedAsync("c", true, token);
-        await coordinator.RecordingEndedAsync("c", token);
-        Assert.True(discord.Muted);
-        Assert.Equal([true, false], discord.Changes);
-    }
-
-    private sealed class FakeDiscord : IDiscordVoiceIntegration
-    {
-        public bool IsAvailable => true;
-        public bool IsAuthorized => true;
-        public string Status => "Connected";
-        public bool Muted { get; set; }
-        public List<bool> Changes { get; } = [];
-        public event EventHandler<bool>? MuteStateChanged;
-        public Task ConfigureAsync(string? clientId, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<bool> GetMuteStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(Muted);
-        public Task SetMuteStateAsync(bool muted, CancellationToken cancellationToken = default) { Muted = muted; Changes.Add(muted); MuteStateChanged?.Invoke(this, muted); return Task.CompletedTask; }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class FakeInput : IKeyboardInputSimulator

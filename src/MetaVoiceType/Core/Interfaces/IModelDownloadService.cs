@@ -6,7 +6,7 @@ public sealed record ModelDownloadProgress(string Stage, long BytesDownloaded, l
 }
 
 public sealed record ModelInstallRequest(Uri ArchiveUrl, string ArchiveType, string ExpectedDirectory, string DestinationRoot,
-    string? ArchiveSha256, long? EstimatedDownloadBytes, IReadOnlyList<string> RequiredFiles);
+    string? ArchiveSha256, long? ExpectedBytes, IReadOnlyList<string> RequiredFiles);
 
 public interface IModelDownloadService
 {

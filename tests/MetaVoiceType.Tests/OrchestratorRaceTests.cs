@@ -4,7 +4,6 @@ using MetaVoiceType.Core.Interfaces;
 using MetaVoiceType.Core.Models;
 using MetaVoiceType.Core.State;
 using MetaVoiceType.Diagnostics;
-using MetaVoiceType.Integrations;
 using MetaVoiceType.Sessions;
 using MetaVoiceType.Storage;
 using MetaVoiceType.Transcription;
@@ -15,6 +14,48 @@ namespace MetaVoiceType.Tests;
 
 public sealed class OrchestratorRaceTests
 {
+    [AvaloniaFact]
+    public async Task RecordingEventShortcutsCoverStartStopPasteCancelAndContinueExactlyOnce()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MetaVoiceType.Tests", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root);
+        var audio = new FakeAudio();
+        var history = new FakeHistory();
+        DateTimeOffset priorTime = DateTimeOffset.UtcNow.AddMinutes(-1);
+        history.Records.Add(new("prior", priorTime, priorTime.AddSeconds(1), DictationStatus.Completed, "auto", "Prior text.", false, false, false, "prior"));
+        var settings = new FakeSettings(new AppSettings
+        {
+            OnboardingComplete = true,
+            CopyOnStop = false,
+            RecordingStartedShortcut = "Ctrl+Shift+M",
+            RecordingStoppedShortcut = "Ctrl+Shift+M"
+        });
+        var input = new FakeInput();
+        using var paste = new PasteCoordinator(new FakeClipboard(), new FakeInsertion(), NullLogger<PasteCoordinator>.Instance);
+        var orchestrator = new ApplicationOrchestrator(audio, history, settings, paste,
+            new DecodeCoordinator(NullLogger<DecodeCoordinator>.Instance), new RecoveryWriter(paths, NullLogger<RecoveryWriter>.Instance),
+            new VoskCommandRecognizer(NullLogger<VoskCommandRecognizer>.Instance),
+            new CustomCommandExecutor(input, NullLogger<CustomCommandExecutor>.Instance), new RecordingEventShortcutPlayer(input),
+            new FakeCues(), new MetaVoiceTypeState(),
+            new SherpaRuntimeBootstrapper(paths, new(false, false, false, true, false, false, null, "auto"), NullLogger<SherpaRuntimeBootstrapper>.Instance),
+            NullLoggerFactory.Instance, NullLogger<ApplicationOrchestrator>.Instance)
+        { SegmenterFactory = _ => new FlushSegmenter([]) };
+        try
+        {
+            await orchestrator.InitializeAsync(TestContext.Current.CancellationToken);
+            orchestrator.SetBackendForTesting(new BlockingBackend(""));
+
+            Assert.True(orchestrator.StartRecording()); Assert.True(orchestrator.StopRecording());
+            Assert.True(orchestrator.StartRecording()); Assert.Equal(PasteRequestResult.Accepted, orchestrator.PasteHere());
+            Assert.True(orchestrator.StartRecording()); Assert.True(orchestrator.StopRecording(canceled: true));
+            Assert.True(orchestrator.ContinueRecording()); Assert.True(orchestrator.StopRecording());
+
+            Assert.Equal(8, input.Values.Count);
+            Assert.All(input.Values, value => Assert.Equal("Ctrl+Shift+M", value));
+        }
+        finally { await orchestrator.DisposeAsync(); if (Directory.Exists(root)) Directory.Delete(root, true); }
+    }
+
     [AvaloniaFact]
     public async Task StopThenPasteWhileFinalizingPastesThatExactSessionOnce()
     {
@@ -29,12 +70,11 @@ public sealed class OrchestratorRaceTests
         var decode = new DecodeCoordinator(NullLogger<DecodeCoordinator>.Instance);
         var recovery = new RecoveryWriter(paths, NullLogger<RecoveryWriter>.Instance);
         var commands = new VoskCommandRecognizer(NullLogger<VoskCommandRecognizer>.Instance);
-        var discord = new FakeDiscord();
-        using var discordMute = new DiscordAutoMuteCoordinator(discord, NullLogger<DiscordAutoMuteCoordinator>.Instance);
+        var shortcutPlayer = new RecordingEventShortcutPlayer(new FakeInput());
         var backend = new BlockingBackend("race transcript");
         var runtime = new SherpaRuntimeBootstrapper(paths, new(false, false, false, true, false, false, null, "auto"), NullLogger<SherpaRuntimeBootstrapper>.Instance);
         var orchestrator = new ApplicationOrchestrator(audio, history, settings, paste, decode, recovery, commands,
-            new CustomCommandExecutor(new FakeInput(), NullLogger<CustomCommandExecutor>.Instance), discordMute, discord,
+            new CustomCommandExecutor(new FakeInput(), NullLogger<CustomCommandExecutor>.Instance), shortcutPlayer,
             new FakeCues(), new MetaVoiceTypeState(), runtime, NullLoggerFactory.Instance, NullLogger<ApplicationOrchestrator>.Instance)
         {
             SegmenterFactory = _ => new FlushSegmenter(new float[4_000])
@@ -100,8 +140,9 @@ public sealed class OrchestratorRaceTests
     private sealed class FakeHistory : IHistoryStore
     {
         public List<TranscriptRecord> Records { get; } = [];
-        public Task<IReadOnlyList<TranscriptRecord>> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TranscriptRecord>>([]);
-        public Task AddAsync(TranscriptRecord record, CancellationToken cancellationToken = default) { Records.Add(record); return Task.CompletedTask; }
+        public Task<IReadOnlyList<TranscriptRecord>> LoadAsync(CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<TranscriptRecord>>(Records.ToArray());
+        public Task AddAsync(TranscriptRecord record, CancellationToken cancellationToken = default) { Records.RemoveAll(x => x.LogicalId == record.LogicalId); Records.Add(record); return Task.CompletedTask; }
+        public Task DeleteAsync(string logicalTranscriptId, CancellationToken cancellationToken = default) { Records.RemoveAll(x => x.LogicalId == logicalTranscriptId); return Task.CompletedTask; }
     }
 
     private sealed class FakeSettings(AppSettings value) : ISettingsStore
@@ -125,7 +166,8 @@ public sealed class OrchestratorRaceTests
 
     private sealed class FakeInput : IKeyboardInputSimulator
     {
-        public Task SendShortcutAsync(ShortcutGesture shortcut, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public List<string> Values { get; } = [];
+        public Task SendShortcutAsync(ShortcutGesture shortcut, CancellationToken cancellationToken = default) { Values.Add(shortcut.ToString()); return Task.CompletedTask; }
     }
 
     private sealed class FakeCues : IAudioCueService
@@ -135,15 +177,4 @@ public sealed class OrchestratorRaceTests
         public void PlayRecovered(double volume) { }
     }
 
-    private sealed class FakeDiscord : IDiscordVoiceIntegration
-    {
-        public bool IsAvailable => false;
-        public bool IsAuthorized => false;
-        public string Status => "Not configured";
-        public event EventHandler<bool>? MuteStateChanged;
-        public Task ConfigureAsync(string? clientId, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<bool> GetMuteStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
-        public Task SetMuteStateAsync(bool muted, CancellationToken cancellationToken = default) { MuteStateChanged?.Invoke(this, muted); return Task.CompletedTask; }
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
-    }
 }

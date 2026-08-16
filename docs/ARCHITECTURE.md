@@ -1,28 +1,31 @@
 # Architecture
 
-MetaVoiceType is a .NET 10 Avalonia desktop app using dependency injection and CommunityToolkit.Mvvm.
+MetaVoiceType is a Windows-only .NET 10 Avalonia application using dependency injection, CommunityToolkit.Mvvm, and managed wrappers for native-backed speech/input libraries. It contains no application-authored native code or bindings.
 
-## Audio and recognition flow
+## Lossless audio and pre-roll
 
-1. `WindowsAudioCaptureService` captures 16 kHz mono PCM16 through WASAPI and moves callback data immediately to a managed channel.
-2. Every frame reaches the active Vosk command recognizer. A dictation session receives frames only after Start Recording.
-3. Vosk word timestamps are mapped to the shared global sample clock. Accepted control-command spans are removed from Parakeet audio before decode; a conservative text-tail fallback is used only when timestamps are absent. Confidence is passed through but never used.
-4. Sherpa's Silero VAD emits bounded speech segments. `DecodeCoordinator` serializes offline Parakeet work away from the audio callback and preserves segment order.
-5. A stopped session can finalize while a new session records. Stop→Paste binds to the stopped session and executes exactly once after its history commit.
-6. `RecoveryWriter` flushes PCM before `JsonHistoryStore` commits. PCM is deleted only after the transcript is durable.
+`WindowsAudioCaptureService` keeps the WASAPI callback to copy, timestamp, enqueue, and return. Conversion, Vosk, VAD, Parakeet, recovery I/O, JSON, and UI dispatch all happen outside that callback. The managed channel is unbounded so a temporary consumer stall does not discard audio; captured, dispatched, dropped, current queue, and high-water counters expose actual behavior.
 
-Vosk command language is separate from Parakeet dictation mode. Vosk grammar rebuilds atomically when built-in or custom phrases change. Parakeet backend switching retires an old recognizer only after every session using it completes.
+Each 16 kHz frame receives a global sample range and enters a rolling one-second `AudioPreRollBuffer` before Vosk processes it. When Start or Continue is accepted, Vosk's word end timestamp is mapped onto that sample clock. Only buffered samples after the command boundary are replayed, through the exact live join boundary. The frame that caused recognition is not delivered twice. If a control command occurs during recording, its timestamped range is removed before Parakeet decode; Vosk confidence is never used.
 
-## Provider bootstrap
+Silero VAD produces speech segments. `DecodeCoordinator` serializes Parakeet jobs and reports its queue high-water mark. `RecoveryWriter` independently persists PCM and its logical/segment identity, with its own queue instrumentation.
 
-The strongly typed catalog describes artifacts, never transient provider state. At runtime the app detects NVIDIA with `nvidia-smi`, validates the downloaded official Sherpa CUDA bundle, validates bundled NuGet CUDA/cuDNN dependencies, and installs a managed DLL resolver before the first Sherpa native call. CUDA initialization is warmed up; any failure recreates the same model with the CPU provider and surfaces the reason.
+## Logical transcripts
 
-## Storage
+A normal Start creates a new logical transcript. Continue selects the newest eligible record and starts a new physical segment carrying the original logical ID, original start time, prior corrected text, segment count, and accumulated duration. Completion upserts that logical history record; repeated Continue operations therefore remain one item. Canceling a continuation preserves the original record. Recovery metadata reconnects an interrupted continuation to that same logical ID.
 
-`%LOCALAPPDATA%\MetaVoiceType` contains schema-versioned settings, atomic history, `Models\Vosk`, `Models\Parakeet`, `Models\Runtime`, temporary `Recovery`, and rolling `Logs`. Logs exclude audio and transcript bodies.
+Accepted command audio is removed first. `WordReplacementEngine` then applies literal, case-insensitive, Unicode-aware boundary matching in longest-match-first order to the new authoritative segment only. Corrected prior history text is never processed twice. The combined corrected result is used for history, automatic copy, Recent Copy, pill snapshots, and Paste Recording.
 
-## Model transaction
+## Commands and lifecycle shortcuts
 
-`catalog → temporary .part → SHA-256 → safe extraction → required-file validation → atomic directory commit`
+Vosk grammar contains seven configurable built-ins plus enabled custom commands for the active command language. Program, PowerShell, Command Prompt, and keyboard actions remain available while dictating. `ShortcutGestureParser.ParseAction` permits single non-modifier keys; playback is modifier-down → key-down → key-up → reverse-modifier-up, with a `finally` release guard.
 
-ZIP and tar.bz2 entries are constrained beneath the temporary root. Direct-file artifacts use the same validation and commit path.
+`RecordingEventShortcutPlayer` owns recording lifecycle deduplication. A shortcut fires once after a session truly starts and once on every actual end path (Stop, Paste Recording, Cancel, toggle, or clean exit). It has no target-app state and no Discord API dependency.
+
+## Models, providers, and storage
+
+The strongly typed JSON catalogs contain immutable artifact identity, repository/release/asset pins, URL, exact bytes, SHA-256, extraction type, required files, capability, and license metadata—never current CPU/GPU state. Downloads use `.part → byte validation → SHA-256 → safe extraction → required-file validation → atomic commit`. Replacement Vosk models initialize before becoming the active language; the old recognizer remains active during download and validation.
+
+At runtime, Sherpa prefers the official pinned CUDA bundle when a compatible NVIDIA GPU is detected and cleanly recreates the recognizer on CPU after any provider failure. Parakeet V3 automatically detects among its 25 supported languages; this backend exposes no fake forced-language hint.
+
+`%LOCALAPPDATA%\MetaVoiceType` retains compatible V1.1 settings/history/model locations. Schema-3 settings add replacements and event shortcuts without changing prior theme, hotkey, command overrides, custom commands, or models. `METAVOICETYPE_DATA_ROOT` provides an isolated root for diagnostics and QA only.

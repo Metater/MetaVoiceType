@@ -15,7 +15,9 @@ public sealed partial class DecodeCoordinator(ILogger<DecodeCoordinator> logger)
     private readonly CancellationTokenSource _lifetime = new();
     private Task? _loop;
     private int _depth;
+    private int _maxDepth;
     public int QueueDepth => Volatile.Read(ref _depth);
+    public int MaxQueueDepth => Volatile.Read(ref _maxDepth);
     public event EventHandler<DictationSession>? TranscriptChanged;
     public event EventHandler<DictationSession>? SessionCompleted;
 
@@ -25,7 +27,22 @@ public sealed partial class DecodeCoordinator(ILogger<DecodeCoordinator> logger)
     {
         foreach (DictationSegment segment in segments)
         {
-            if (_jobs.Writer.TryWrite(new(session, segment))) Interlocked.Increment(ref _depth);
+            if (_jobs.Writer.TryWrite(new(session, segment)))
+            {
+                int depth = Interlocked.Increment(ref _depth);
+                UpdateMaximum(ref _maxDepth, depth);
+            }
+        }
+    }
+
+    private static void UpdateMaximum(ref int maximum, int value)
+    {
+        int current = Volatile.Read(ref maximum);
+        while (value > current)
+        {
+            int found = Interlocked.CompareExchange(ref maximum, value, current);
+            if (found == current) return;
+            current = found;
         }
     }
 

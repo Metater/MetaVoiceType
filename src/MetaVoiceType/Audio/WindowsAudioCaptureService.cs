@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Threading.Channels;
 using MetaVoiceType.Core.Interfaces;
 using Microsoft.Extensions.Logging;
 using NAudio.CoreAudioApi;
@@ -9,21 +8,16 @@ namespace MetaVoiceType.Audio;
 
 public sealed partial class WindowsAudioCaptureService(ILogger<WindowsAudioCaptureService> logger) : IAudioCaptureService
 {
-    private readonly Channel<byte[]> _frames = Channel.CreateUnbounded<byte[]>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true, AllowSynchronousContinuations = false });
+    private readonly AudioFrameBuffer _frames = new();
     private readonly CancellationTokenSource _lifetime = new();
     private WasapiCapture? _capture;
     private Task? _dispatch;
-    private long _captured;
-    private int _depth;
-    private int _maxDepth;
-    private long _lost;
     private long _callbackTicks;
 
     public event EventHandler<AudioFrame>? FrameReady;
     public event EventHandler<double>? LevelChanged;
     public bool IsRunning => _capture is not null;
-    public AudioMetrics Metrics => new(Interlocked.Read(ref _captured), Volatile.Read(ref _depth), Volatile.Read(ref _maxDepth), Interlocked.Read(ref _lost),
-        Interlocked.Read(ref _callbackTicks) * 1000d / Stopwatch.Frequency);
+    public AudioMetrics Metrics => _frames.Snapshot(Interlocked.Read(ref _callbackTicks) * 1000d / Stopwatch.Frequency);
 
     public IReadOnlyList<AudioDevice> EnumerateDevices()
     {
@@ -58,20 +52,15 @@ public sealed partial class WindowsAudioCaptureService(ILogger<WindowsAudioCaptu
         {
             var copy = new byte[args.BytesRecorded];
             Buffer.BlockCopy(args.Buffer, 0, copy, 0, args.BytesRecorded);
-            if (_frames.Writer.TryWrite(copy))
+            if (_frames.TryEnqueue(copy))
             {
-                Interlocked.Increment(ref _captured);
-                int depth = Interlocked.Increment(ref _depth);
-                int maximum = Volatile.Read(ref _maxDepth);
-                while (depth > maximum)
-                {
-                    int found = Interlocked.CompareExchange(ref _maxDepth, depth, maximum);
-                    if (found == maximum) break;
-                    maximum = found;
-                }
+                int depth = _frames.Depth;
                 if (depth == 250) LogBacklog(logger, depth);
             }
-            else Interlocked.Increment(ref _lost);
+            else
+            {
+                LogDroppedFrame(logger, _frames.DroppedFrames);
+            }
         }
         Interlocked.Exchange(ref _callbackTicks, Stopwatch.GetTimestamp() - started);
     }
@@ -80,9 +69,8 @@ public sealed partial class WindowsAudioCaptureService(ILogger<WindowsAudioCaptu
     {
         try
         {
-            await foreach (byte[] bytes in _frames.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (byte[] bytes in _frames.ReadAllAsync(cancellationToken).ConfigureAwait(false))
             {
-                Interlocked.Decrement(ref _depth);
                 AudioFrame frame = Pcm16Converter.Convert(bytes);
                 FrameReady?.Invoke(this, frame);
                 LevelChanged?.Invoke(this, frame.Peak);
@@ -111,7 +99,7 @@ public sealed partial class WindowsAudioCaptureService(ILogger<WindowsAudioCaptu
     {
         await StopAsync().ConfigureAwait(false);
         _lifetime.Cancel();
-        _frames.Writer.TryComplete();
+        _frames.Complete();
         if (_dispatch is not null) try { await _dispatch.ConfigureAwait(false); } catch (OperationCanceledException) { }
         _lifetime.Dispose();
     }
@@ -122,4 +110,6 @@ public sealed partial class WindowsAudioCaptureService(ILogger<WindowsAudioCaptu
     private static partial void LogCaptureError(ILogger logger, Exception exception);
     [LoggerMessage(Level = LogLevel.Error, Message = "Audio dispatch backlog reached {Depth} frames; recognition cannot keep up.")]
     private static partial void LogBacklog(ILogger logger, int depth);
+    [LoggerMessage(Level = LogLevel.Critical, Message = "Audio capture buffer exhausted; dropped frame count is now {DroppedFrames}.")]
+    private static partial void LogDroppedFrame(ILogger logger, long droppedFrames);
 }

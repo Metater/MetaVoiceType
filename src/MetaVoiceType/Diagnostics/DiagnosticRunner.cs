@@ -73,7 +73,7 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
             if (audio.Metrics.FramesCaptured == before) throw new InvalidOperationException($"Audio device '{device.Name}' produced no frames.");
         }
         AudioMetrics metrics = audio.Metrics;
-        if (metrics.LostFrames != 0) throw new InvalidOperationException($"Audio frames were lost during capture: {metrics.LostFrames}.");
+        if (metrics.FramesDropped != 0) throw new InvalidOperationException($"Audio frames were lost during capture: {metrics.FramesDropped}.");
 
         AudioFrame[]? testFrames = options.AudioFile is null ? null : ReadAudio(options.AudioFile);
         if (dictationInstalled)
@@ -121,9 +121,10 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
         using var session = new DictationSession(options.DictationLanguage, 0, backend, vadPath);
         await using var coordinator = new DecodeCoordinator(loggerFactory.CreateLogger<DecodeCoordinator>());
         coordinator.Start();
+        recovery.Start();
         int commandTriggers = 0;
         vosk.CommandRecognized += (_, _) => Interlocked.Increment(ref commandTriggers);
-        void OnFrame(object? sender, AudioFrame frame) { vosk.Accept(frame); coordinator.Enqueue(session, session.Accept(frame)); }
+        void OnFrame(object? sender, AudioFrame frame) { vosk.Accept(frame); coordinator.Enqueue(session, session.Accept(frame)); recovery.Enqueue(session, frame); }
         audio.FrameReady += OnFrame;
         long startedMemory = Environment.WorkingSet;
         try
@@ -133,23 +134,24 @@ public sealed partial class DiagnosticRunner(IAudioCaptureService audio, IModelD
             {
                 await Task.Delay(TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
                 AudioMetrics current = audio.Metrics;
-                Console.WriteLine($"Stress {minute}/{options.StressMinutes}: frames={current.FramesCaptured}, queue={current.QueueDepth}, maxQueue={current.MaxQueueDepth}, lost={current.LostFrames}, asrQueue={coordinator.QueueDepth}");
+                Console.WriteLine($"Stress {minute}/{options.StressMinutes}: captured={current.FramesCaptured}, dispatched={current.FramesDispatched}, dropped={current.FramesDropped}, captureQueue={current.QueueDepth}, captureHighWater={current.CaptureQueueHighWaterMark}, parakeetQueue={coordinator.QueueDepth}, parakeetHighWater={coordinator.MaxQueueDepth}, recoveryQueue={recovery.QueueDepth}, recoveryHighWater={recovery.MaxQueueDepth}, memoryBytes={Environment.WorkingSet}");
             }
         }
         finally { audio.FrameReady -= OnFrame; await audio.StopAsync(cancellationToken).ConfigureAwait(false); }
         coordinator.Finalize(session, session.Stop(false, false));
+        await recovery.CloseAsync(session).WaitAsync(TimeSpan.FromMinutes(1), cancellationToken).ConfigureAwait(false);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromMinutes(5));
         while (session.Status == DictationStatus.Finalizing) await Task.Delay(20, timeout.Token).ConfigureAwait(false);
         AudioMetrics final = audio.Metrics;
-        Console.WriteLine($"Stress complete: provider={backend.Status.Provider}, status={session.Status}, finalizationMs={session.FinalizationMilliseconds:F1}, lost={final.LostFrames}, commandTriggers={commandTriggers}, memoryDeltaBytes={Environment.WorkingSet - startedMemory}");
-        if (final.LostFrames != 0 || final.QueueDepth != 0 || coordinator.QueueDepth != 0) throw new InvalidOperationException("A real-time queue did not drain losslessly.");
+        recovery.Delete(session.Id);
+        Console.WriteLine($"Stress complete: provider={backend.Status.Provider}, status={session.Status}, finalizationMs={session.FinalizationMilliseconds:F1}, FramesCaptured={final.FramesCaptured}, FramesDispatched={final.FramesDispatched}, FramesDropped={final.FramesDropped}, CaptureQueueHighWaterMark={final.CaptureQueueHighWaterMark}, ParakeetQueueHighWaterMark={coordinator.MaxQueueDepth}, RecoveryQueueHighWaterMark={recovery.MaxQueueDepth}, commandTriggers={commandTriggers}, memoryDeltaBytes={Environment.WorkingSet - startedMemory}");
+        if (final.FramesDropped != 0 || final.QueueDepth != 0 || coordinator.QueueDepth != 0 || recovery.QueueDepth != 0) throw new InvalidOperationException("A real-time queue did not drain losslessly.");
     }
 
     private async Task InstallModelsAsync(ModelCatalog catalog, ModelArtifact dictation, VoiceCommandLanguage language, CancellationToken cancellationToken)
     {
-        await downloads.InstallAsync(new(language.ArchiveUrl, language.ArchiveType, language.ModelName, paths.VoskModels, null,
-            language.SizeBytes, ["am/final.mdl", "conf/mfcc.conf"]), Progress("Vosk"), cancellationToken).ConfigureAwait(false);
+        await downloads.InstallAsync(language.ToInstallRequest(paths.VoskModels), Progress("Vosk"), cancellationToken).ConfigureAwait(false);
         IEnumerable<ModelArtifact> artifacts = new[] { catalog.Get("silero-vad"), dictation };
         if (!runtime.ForceCpu && runtime.ProbeNvidiaGpu() is not null) artifacts = new[] { catalog.Get("sherpa-cuda-12") }.Concat(artifacts);
         foreach (ModelArtifact artifact in artifacts)

@@ -34,15 +34,16 @@ public sealed class DictationSession : IDisposable
     private int _pendingJobs;
     private bool _completionPublished;
     private int _disposed;
+    private readonly TranscriptRecord? _continuedRecord;
 
     public DictationSession(string language, long globalStartSample, IAsrBackend backend, string vadModelPath,
-        string? id = null, DateTimeOffset? startedAt = null)
-        : this(language, globalStartSample, backend, new SherpaVadSegmenter(vadModelPath), id, startedAt)
+        string? id = null, DateTimeOffset? startedAt = null, TranscriptRecord? continuedRecord = null)
+        : this(language, globalStartSample, backend, new SherpaVadSegmenter(vadModelPath), id, startedAt, continuedRecord)
     {
     }
 
     public DictationSession(string language, long globalStartSample, IAsrBackend backend, ISpeechSegmenter segmenter,
-        string? id = null, DateTimeOffset? startedAt = null)
+        string? id = null, DateTimeOffset? startedAt = null, TranscriptRecord? continuedRecord = null)
     {
         Id = id ?? Guid.NewGuid().ToString("N");
         Language = language;
@@ -50,12 +51,19 @@ public sealed class DictationSession : IDisposable
         _backend = backend;
         _vad = segmenter;
         StartedAt = startedAt ?? DateTimeOffset.UtcNow;
+        _continuedRecord = continuedRecord;
     }
 
     public string Id { get; }
     public string Language { get; }
     public long GlobalStartSample { get; }
     public DateTimeOffset StartedAt { get; }
+    public string LogicalTranscriptId => _continuedRecord?.LogicalId ?? Id;
+    public DateTimeOffset LogicalStartedAt => _continuedRecord?.StartedAt ?? StartedAt;
+    public int PriorSegmentCount => _continuedRecord?.SegmentCount ?? 0;
+    public double PriorDurationSeconds => _continuedRecord?.TotalDurationSeconds ?? 0;
+    public bool IsContinuation => _continuedRecord is not null;
+    public string PreviousText => _continuedRecord?.Text ?? "";
     public DateTimeOffset? StoppedAt { get; private set; }
     public bool Canceled { get; private set; }
     public bool PasteRequested { get; private set; }
@@ -67,8 +75,9 @@ public sealed class DictationSession : IDisposable
     public AsrRuntimeStatus RuntimeStatus => _backend.Status;
     internal IAsrBackend Backend => _backend;
     public DictationStatus Status { get { lock (_gate) return _status; } }
-    public string LiveText { get { lock (_gate) return AssembleText(); } }
-    public string FinalText { get { lock (_gate) return AssembleText(); } }
+    public string SegmentText { get { lock (_gate) return AssembleText(); } }
+    public string LiveText { get { lock (_gate) return Combine(_continuedRecord?.Text, AssembleText()); } }
+    public string FinalText { get { lock (_gate) return Combine(_continuedRecord?.Text, AssembleText()); } }
     public IReadOnlyList<ControlAudioSpan> ControlSpans { get { lock (_gate) return _controlSpans.ToArray(); } }
 
     public IReadOnlyList<DictationSegment> Accept(Audio.AudioFrame frame)
@@ -201,6 +210,7 @@ public sealed class DictationSession : IDisposable
     }
 
     private string AssembleText() => string.Join(' ', _segments.Values.OrderBy(x => x.Start).Select(x => x.Text).Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
+    private static string Combine(string? previous, string? appended) => string.Join(' ', new[] { previous, appended }.Where(x => !string.IsNullOrWhiteSpace(x))).Trim();
     internal string TranscribeForCoordinator(float[] samples) => _backend.Transcribe(samples);
     public void Dispose() { if (Interlocked.Exchange(ref _disposed, 1) == 0) _vad.Dispose(); }
 }

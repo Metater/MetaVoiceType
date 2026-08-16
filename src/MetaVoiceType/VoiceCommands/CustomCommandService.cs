@@ -25,7 +25,7 @@ public static class CustomCommandValidator
             case CustomCommandType.Program when string.IsNullOrWhiteSpace(command.Executable): throw new InvalidDataException("Choose an executable.");
             case CustomCommandType.PowerShell or CustomCommandType.CommandPrompt when string.IsNullOrWhiteSpace(command.ScriptOrCommand):
                 throw new InvalidDataException("Enter a script or command.");
-            case CustomCommandType.KeyboardShortcut: _ = ShortcutGestureParser.Parse(command.Shortcut); break;
+            case CustomCommandType.KeyboardShortcut: _ = ShortcutGestureParser.ParseAction(command.Shortcut); break;
         }
         if (!string.IsNullOrWhiteSpace(command.WorkingDirectory) && !Directory.Exists(command.WorkingDirectory))
             throw new DirectoryNotFoundException("The command working directory does not exist.");
@@ -39,7 +39,7 @@ public sealed partial class CustomCommandExecutor(IKeyboardInputSimulator input,
         if (!command.Enabled) return new(false, null, "", "");
         if (command.CommandType == CustomCommandType.KeyboardShortcut)
         {
-            await input.SendShortcutAsync(ShortcutGestureParser.Parse(command.Shortcut), cancellationToken).ConfigureAwait(false);
+            await input.SendShortcutAsync(ShortcutGestureParser.ParseAction(command.Shortcut), cancellationToken).ConfigureAwait(false);
             LogExecuted(logger, command.Id, command.CommandType);
             return new(true, 0, "", "");
         }

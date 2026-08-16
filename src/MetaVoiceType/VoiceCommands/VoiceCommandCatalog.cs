@@ -8,12 +8,24 @@ public sealed record VoiceCommandLanguage(
     string Id,
     string DisplayName,
     string ModelName,
+    string Repository,
+    string ReleaseTag,
+    string AssetName,
+    long? AssetId,
     Uri ArchiveUrl,
     string ArchiveType,
+    string ArchiveSha256,
+    long ArchiveBytes,
+    IReadOnlyList<string> RequiredFiles,
     string License,
     string RestrictedGrammar,
-    long? SizeBytes,
-    IReadOnlyDictionary<string, string> Commands);
+    IReadOnlyDictionary<string, string> Commands)
+{
+    public long SizeBytes => ArchiveBytes;
+
+    public Core.Interfaces.ModelInstallRequest ToInstallRequest(string destinationRoot) =>
+        new(ArchiveUrl, ArchiveType, ModelName, destinationRoot, ArchiveSha256, ArchiveBytes, RequiredFiles);
+}
 
 public sealed record VoiceCommandCatalog(int SchemaVersion, string DefaultLanguage, IReadOnlyList<VoiceCommandLanguage> Languages)
 {
@@ -34,7 +46,7 @@ public sealed record VoiceCommandCatalog(int SchemaVersion, string DefaultLangua
 
     public void Validate()
     {
-        if (SchemaVersion != 1 || Languages.Count == 0) throw new InvalidDataException("Unsupported or empty catalog.");
+        if (SchemaVersion != 2 || Languages.Count == 0) throw new InvalidDataException("Unsupported or empty catalog.");
         if (Languages.Select(x => x.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != Languages.Count)
             throw new InvalidDataException("Duplicate language IDs exist.");
         if (!Languages.Any(x => x.Id.Equals(DefaultLanguage, StringComparison.OrdinalIgnoreCase)))
@@ -43,6 +55,11 @@ public sealed record VoiceCommandCatalog(int SchemaVersion, string DefaultLangua
         {
             if (!language.ArchiveUrl.IsAbsoluteUri || language.ArchiveUrl.Scheme != Uri.UriSchemeHttps)
                 throw new InvalidDataException($"Invalid archive URL for {language.Id}.");
+            if (string.IsNullOrWhiteSpace(language.Repository) || string.IsNullOrWhiteSpace(language.ReleaseTag) ||
+                string.IsNullOrWhiteSpace(language.AssetName) || !language.ArchiveUrl.AbsolutePath.EndsWith('/' + language.AssetName, StringComparison.Ordinal) ||
+                language.ArchiveSha256.Length != 64 || language.ArchiveSha256.Any(x => !Uri.IsHexDigit(x)) || language.ArchiveBytes <= 0 ||
+                language.RequiredFiles.Count == 0)
+                throw new InvalidDataException($"Incomplete deterministic artifact pin for {language.Id}.");
             if (!language.ModelName.Contains("small", StringComparison.OrdinalIgnoreCase) && language.Id != "uk")
                 throw new InvalidDataException($"Non-small model is only permitted for Ukrainian ({language.Id}).");
             CommandPhraseValidator.Validate(language.Commands);

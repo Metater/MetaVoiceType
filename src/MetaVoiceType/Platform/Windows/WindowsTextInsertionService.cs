@@ -18,13 +18,19 @@ public sealed class WindowsTextInsertionService : ITextInsertionService, IKeyboa
         var pressed = new List<KeyCode>();
         try
         {
-            foreach (KeyCode modifier in shortcut.Modifiers)
+            foreach (KeyboardStroke stroke in shortcut.PlaybackSequence())
             {
-                EnsureSuccess(_simulator.SimulateKeyPress(modifier), modifier, "press");
-                pressed.Add(modifier);
+                if (stroke.IsKeyDown)
+                {
+                    EnsureSuccess(_simulator.SimulateKeyPress(stroke.Key), stroke.Key, "press");
+                    pressed.Add(stroke.Key);
+                }
+                else
+                {
+                    EnsureSuccess(_simulator.SimulateKeyRelease(stroke.Key), stroke.Key, "release");
+                    pressed.Remove(stroke.Key);
+                }
             }
-            EnsureSuccess(_simulator.SimulateKeyPress(shortcut.Key), shortcut.Key, "press");
-            EnsureSuccess(_simulator.SimulateKeyRelease(shortcut.Key), shortcut.Key, "release");
         }
         finally
         {

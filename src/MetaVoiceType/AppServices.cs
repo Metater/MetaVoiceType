@@ -2,7 +2,6 @@ using MetaVoiceType.Audio;
 using MetaVoiceType.Core.Interfaces;
 using MetaVoiceType.Core.State;
 using MetaVoiceType.Diagnostics;
-using MetaVoiceType.Integrations;
 using MetaVoiceType.Models;
 using MetaVoiceType.Platform.Windows;
 using MetaVoiceType.Sessions;
@@ -51,8 +50,7 @@ public static class AppServices
             services.AddSingleton<RecoveryWriter>();
             services.AddSingleton<VoskCommandRecognizer>();
             services.AddSingleton<CustomCommandExecutor>();
-            services.AddSingleton<IDiscordVoiceIntegration, DiscordRpcVoiceIntegration>();
-            services.AddSingleton<DiscordAutoMuteCoordinator>();
+            services.AddSingleton<RecordingEventShortcutPlayer>();
             services.AddSingleton<SherpaRuntimeBootstrapper>();
             services.AddSingleton<ApplicationOrchestrator>();
             services.AddSingleton<MainViewModel>();
