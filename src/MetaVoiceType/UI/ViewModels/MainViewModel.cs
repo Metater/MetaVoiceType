@@ -134,6 +134,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial string CommandValidation { get; set; } = "";
     [ObservableProperty] public partial string UpdateStatus { get; set; } = "Not checked";
     [ObservableProperty] public partial bool UpdateAvailable { get; set; }
+    [ObservableProperty] public partial bool IsUpdating { get; set; }
+    [ObservableProperty] public partial double UpdatePercent { get; set; }
     [ObservableProperty] public partial string HotkeyGesture { get; set; } = "Ctrl+Space";
     [ObservableProperty] public partial string HotkeyValidation { get; set; } = "";
     [ObservableProperty] public partial ShortcutCaptureTarget ActiveShortcutCapture { get; set; }
@@ -519,10 +521,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task UpdateNowAsync()
     {
-        IsDownloading = true;
-        DownloadStatus = "Downloading application update";
-        try { await _updates.DownloadAndRestartAsync(new Progress<int>(value => DownloadPercent = value)); }
-        finally { IsDownloading = false; }
+        IsUpdating = true;
+        UpdatePercent = 0;
+        UpdateStatus = "Downloading update · 0%";
+        try
+        {
+            await _updates.DownloadAndRestartAsync(new Progress<int>(value =>
+            {
+                UpdatePercent = Math.Clamp(value, 0, 100);
+                UpdateStatus = $"Downloading update · {UpdatePercent:F0}%";
+            }));
+        }
+        catch (Exception ex)
+        {
+            UpdateStatus = "Update download failed: " + ex.Message;
+        }
+        finally { IsUpdating = false; }
     }
     [RelayCommand]
     private void ResetCommands()
