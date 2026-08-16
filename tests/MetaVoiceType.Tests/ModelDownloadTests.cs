@@ -41,6 +41,24 @@ public sealed class ModelDownloadTests : IDisposable
         Assert.False(Directory.Exists(Path.Combine(_root, "model")));
     }
 
+    [Fact]
+    public async Task InterruptedExtractionIsRecoveredWithoutDownloadingAgain()
+    {
+        string abandoned = Path.Combine(_root, ".install-interrupted", "model", "am");
+        Directory.CreateDirectory(abandoned);
+        await File.WriteAllTextAsync(Path.Combine(abandoned, "final.mdl"), "recovered", TestContext.Current.CancellationToken);
+        var handler = new CountingHandler();
+        var service = new ModelDownloadService(new HttpClient(handler), NullLogger<ModelDownloadService>.Instance);
+        var request = new ModelInstallRequest(new("https://example.test/model.zip"), "zip", "model", _root,
+            new string('0', 64), 1, ["am/final.mdl"]);
+
+        string installed = await service.InstallAsync(request, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.Equal("recovered", await File.ReadAllTextAsync(Path.Combine(installed, "am", "final.mdl"), TestContext.Current.CancellationToken));
+        Assert.Equal(0, handler.Requests);
+        Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(_root), x => Path.GetFileName(x).StartsWith(".install-", StringComparison.Ordinal));
+    }
+
     private static ModelDownloadService Service(byte[] response) => new(new HttpClient(new StaticHandler(response)), NullLogger<ModelDownloadService>.Instance);
 
     private static byte[] Zip(params (string Path, string Content)[] entries)
@@ -67,5 +85,15 @@ public sealed class ModelDownloadTests : IDisposable
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
             Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(response) });
+    }
+
+    private sealed class CountingHandler : HttpMessageHandler
+    {
+        public int Requests { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        }
     }
 }

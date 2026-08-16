@@ -225,10 +225,10 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         await UpdateSettingsAsync(_settings with { CommandAliases = configured }, cancellationToken).ConfigureAwait(false);
     }
 
-    public bool StartRecording(long? preRollAfterSample = null, TranscriptRecord? continuation = null) =>
-        StartRecordingWithCue(VoiceCommand.StartRecording, preRollAfterSample, continuation);
+    public bool StartRecording(long? preRollAfterSample = null, TranscriptRecord? continuation = null, bool playCue = true) =>
+        StartRecordingWithCue(VoiceCommand.StartRecording, preRollAfterSample, continuation, playCue);
 
-    private bool StartRecordingWithCue(VoiceCommand cue, long? preRollAfterSample = null, TranscriptRecord? continuation = null)
+    private bool StartRecordingWithCue(VoiceCommand cue, long? preRollAfterSample = null, TranscriptRecord? continuation = null, bool playCue = true)
     {
         if (!_actions.IsAllowed(ApplicationAction.ManualRecording)) return false;
         DictationSession session;
@@ -248,7 +248,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
             foreach (AudioFrame frame in _preRoll.Snapshot(after, Interlocked.Read(ref _audioSampleClock))) AcceptForSession(session, frame);
         if (_actions.IsAllowed(ApplicationAction.RecordingEventShortcut))
             _ = _recordingShortcuts.RecordingStartedAsync(session.Id, _settings.RecordingStartedShortcut);
-        _cues.PlayAccepted(cue, _settings.CueVolume);
+        if (playCue) _cues.PlayAccepted(cue, _settings.CueVolume);
         return true;
     }
 
@@ -260,7 +260,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         return StartRecordingWithCue(VoiceCommand.ContinueRecording, preRollAfterSample, latest);
     }
 
-    public bool StopRecording(bool canceled = false, bool paste = false)
+    public bool StopRecording(bool canceled = false, bool paste = false, bool playCue = true)
     {
         lock (_gate) if (_active is null && !_actions.IsAllowed(ApplicationAction.ManualRecording)) return false;
         if (paste && _paste.Reserve() != PasteRequestResult.Accepted) { _cues.PlayError(_settings.CueVolume); return false; }
@@ -280,7 +280,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         _decode.Finalize(session, tail);
         if (_actions.IsAllowed(ApplicationAction.RecordingEventShortcut))
             _ = _recordingShortcuts.RecordingEndedAsync(session.Id, _settings.RecordingStoppedShortcut);
-        _cues.PlayAccepted(canceled ? VoiceCommand.CancelRecording : paste ? VoiceCommand.PasteRecording : VoiceCommand.StopRecording, _settings.CueVolume);
+        if (playCue) _cues.PlayAccepted(canceled ? VoiceCommand.CancelRecording : paste ? VoiceCommand.PasteRecording : VoiceCommand.StopRecording, _settings.CueVolume);
         return true;
     }
 
@@ -447,8 +447,14 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         {
             case VoiceCommand.StartRecording: StartRecording(match.AudioEndSample); break;
             case VoiceCommand.ContinueRecording: ContinueRecording(match.AudioEndSample); break;
-            case VoiceCommand.StopRecording: StopRecording(); break;
-            case VoiceCommand.PasteRecording: PasteHere(); break;
+            case VoiceCommand.StopRecording:
+                await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                StopRecording();
+                break;
+            case VoiceCommand.PasteRecording:
+                await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                PasteHere();
+                break;
             case VoiceCommand.CancelRecording: StopRecording(canceled: true); break;
             case VoiceCommand.CancelPaste:
                 if (_pendingPasteSessionId is not null || _paste.IsActive) CancelPaste(); else _cues.PlayError(_settings.CueVolume);
@@ -539,7 +545,13 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
             ShowFeedback(session.Canceled ? "Canceled" : !hasText ? "Nothing recorded" : session.Pasted ? "Pasting…" : "Saved");
             LogSessionCompleted(_logger, session.Id, text.Length, session.FinalizationMilliseconds ?? 0);
         }
-        catch (Exception ex) { LogCommitFailed(_logger, ex, session.Id); SetStatus("Could not save the transcript; recovery audio was preserved."); }
+        catch (Exception ex)
+        {
+            if (session.PasteRequested) _paste.FailReserved();
+            lock (_gate) if (_pendingPasteSessionId == session.Id) _pendingPasteSessionId = null;
+            LogCommitFailed(_logger, ex, session.Id);
+            SetStatus("Could not save the transcript; recovery audio was preserved.");
+        }
         finally
         {
             lock (_gate)

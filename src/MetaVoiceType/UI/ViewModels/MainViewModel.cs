@@ -62,7 +62,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         State.History.CollectionChanged += (_, _) => { OnPropertyChanged(nameof(HasHistory)); OnPropertyChanged(nameof(CanCopyCurrent)); };
         _hotkey.ToggleRecording += (_, _) =>
         {
-            if (_orchestrator.Readiness.CanUseGlobalRecordingShortcut) ToggleRecording();
+            if (_orchestrator.Readiness.CanUseGlobalRecordingShortcut) ToggleRecording(playCue: false);
         };
         State.PropertyChanged += (_, args) =>
         {
@@ -181,6 +181,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
     public string AnimatedStatusText => Animate(State.StatusMessage);
+    public string AppVersion => "Version " + (GetType().Assembly.GetName().Version?.ToString(3) ?? "1.3.1");
     public string PillStatusText => State.IsRecording ? Animate("Recording") : State.PasteState switch
     {
         PasteRequestState.Queued => Animate("Preparing"),
@@ -328,7 +329,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand] private void NextOnboarding() { if (CanContinueOnboarding && OnboardingStep < 7) OnboardingStep++; }
     [RelayCommand] private void PreviousOnboarding() { if (OnboardingStep > 1) OnboardingStep--; }
     [RelayCommand] private void ToggleSettings() => ShowSettings = !ShowSettings;
-    [RelayCommand] private void ToggleRecording() { if (ActiveShortcutCapture != ShortcutCaptureTarget.None) return; if (State.IsRecording) _orchestrator.StopRecording(); else _orchestrator.StartRecording(); }
+    [RelayCommand] private void ToggleRecording() => ToggleRecording(playCue: true);
+    private void ToggleRecording(bool playCue) { if (ActiveShortcutCapture != ShortcutCaptureTarget.None) return; if (State.IsRecording) _orchestrator.StopRecording(playCue: playCue); else _orchestrator.StartRecording(playCue: playCue); }
     [RelayCommand] private void StopRecording() => _orchestrator.StopRecording();
     [RelayCommand] private void ContinueRecording() => _orchestrator.ContinueRecording();
     [RelayCommand] private void Paste() => _orchestrator.PasteHere();

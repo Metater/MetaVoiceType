@@ -74,6 +74,21 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
         }
     }
 
+    public void FailReserved()
+    {
+        CancellationTokenSource? reserved;
+        lock (_stateGate)
+        {
+            reserved = _pending;
+            if (reserved is null) return;
+            _pending = null;
+            _state = PasteRequestState.Failed;
+        }
+        reserved.Cancel();
+        reserved.Dispose();
+        StateChanged?.Invoke(this, PasteRequestState.Failed);
+    }
+
     public async Task CopyAsync(string text, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(text)) return;

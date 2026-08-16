@@ -1,6 +1,9 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Platform;
+using Avalonia.Input;
+using Avalonia.Interactivity;
+using Avalonia.VisualTree;
 
 namespace MetaVoiceType.UI.Views;
 
@@ -11,6 +14,15 @@ public sealed partial class PillWindow : Window
     {
         InitializeComponent();
         Opened += (_, _) => PositionAtBottomCenter();
+        PillSurface.AddHandler(PointerPressedEvent, PillPressed, RoutingStrategies.Bubble, handledEventsToo: true);
+    }
+
+    public event EventHandler? OpenMainWindowRequested;
+
+    private void PillPressed(object? sender, PointerPressedEventArgs args)
+    {
+        if (args.Source is Visual visual && visual.GetSelfAndVisualAncestors().OfType<Button>().Any()) return;
+        OpenMainWindowRequested?.Invoke(this, EventArgs.Empty);
     }
 
     public void ShowWithoutActivation()

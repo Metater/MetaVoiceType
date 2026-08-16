@@ -21,6 +21,7 @@ public sealed partial class App : Application
             var window = new MainWindow { DataContext = viewModel };
             _mainWindow = window;
             _pillWindow = new PillWindow { DataContext = viewModel };
+            _pillWindow.OpenMainWindowRequested += OpenFromTray;
             viewModel.State.PropertyChanged += (_, args) =>
             {
                 if (args.PropertyName is not (nameof(viewModel.State.IsRecording) or nameof(viewModel.State.PasteState)) || _pillWindow is null) return;

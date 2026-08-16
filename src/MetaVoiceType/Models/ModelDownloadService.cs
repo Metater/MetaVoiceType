@@ -15,11 +15,13 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
         Directory.CreateDirectory(request.DestinationRoot);
         string final = Path.Combine(request.DestinationRoot, request.ExpectedDirectory);
         if (IsValidInstallation(final, request.RequiredFiles)) return final;
+        if (RecoverAbandonedInstallation(request, final)) return final;
         string work = Path.Combine(request.DestinationRoot, ".install-" + Guid.NewGuid().ToString("N"));
         string archive = work + ".part";
         try
         {
             Directory.CreateDirectory(work);
+            await File.WriteAllTextAsync(Path.Combine(work, ".artifact"), request.ExpectedDirectory, cancellationToken).ConfigureAwait(false);
             await DownloadAsync(request.ArchiveUrl, archive, request.ExpectedBytes, progress, cancellationToken).ConfigureAwait(false);
             progress?.Report(new("Verifying", new FileInfo(archive).Length, request.ExpectedBytes, 0));
             await VerifySha256Async(archive, request.ArchiveSha256!, cancellationToken).ConfigureAwait(false);
@@ -45,6 +47,35 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
             if (File.Exists(archive)) File.Delete(archive);
             if (Directory.Exists(work)) Directory.Delete(work, true);
         }
+    }
+
+    private static bool RecoverAbandonedInstallation(ModelInstallRequest request, string final)
+    {
+        foreach (string backup in Directory.EnumerateDirectories(request.DestinationRoot,
+                     request.ExpectedDirectory + ".previous-*", SearchOption.TopDirectoryOnly))
+        {
+            if (!IsValidInstallation(final, request.RequiredFiles) && IsValidInstallation(backup, request.RequiredFiles))
+            {
+                if (Directory.Exists(final)) Directory.Delete(final, true);
+                Directory.Move(backup, final);
+            }
+            else Directory.Delete(backup, true);
+        }
+
+        foreach (string work in Directory.EnumerateDirectories(request.DestinationRoot, ".install-*", SearchOption.TopDirectoryOnly))
+        {
+            string extracted = Path.Combine(work, request.ExpectedDirectory);
+            string marker = Path.Combine(work, ".artifact");
+            bool belongsToRequest = Directory.Exists(extracted) || File.Exists(marker) &&
+                string.Equals(File.ReadAllText(marker).Trim(), request.ExpectedDirectory, StringComparison.Ordinal);
+            if (!belongsToRequest) continue;
+            if (!IsValidInstallation(final, request.RequiredFiles) && IsValidInstallation(extracted, request.RequiredFiles))
+                CommitDirectory(extracted, final);
+            if (Directory.Exists(work)) Directory.Delete(work, true);
+            string archive = work + ".part";
+            if (File.Exists(archive)) File.Delete(archive);
+        }
+        return IsValidInstallation(final, request.RequiredFiles);
     }
 
     private static void CommitDirectory(string extracted, string final)

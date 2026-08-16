@@ -3,8 +3,8 @@
         x:Class="MetaVoiceType.UI.Views.TrayNoticeWindow"
         Width="390" Height="118" CanResize="False" ShowInTaskbar="False"
         WindowDecorations="None" Topmost="True" ShowActivated="False"
-        TransparencyLevelHint="AcrylicBlur" Background="{DynamicResource CanvasBrush}">
-  <Border Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="15" Padding="18">
+        TransparencyLevelHint="Transparent" Background="#00000000">
+  <Border Margin="3" Background="{DynamicResource SurfaceBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="18" Padding="18" BoxShadow="0 5 16 0 #44000000">
     <Grid ColumnDefinitions="Auto,*" ColumnSpacing="14">
       <Image Width="38" Height="38" Source="avares://MetaVoiceType/UI/Assets/metavoicetype.png" Stretch="Uniform"/>
       <StackPanel Grid.Column="1" Spacing="5">
