@@ -24,24 +24,19 @@ jobs:
       - run: dotnet restore MetaVoiceType.slnx
       - run: dotnet build MetaVoiceType.slnx -c Release --no-restore
       - run: dotnet test MetaVoiceType.slnx -c Release --no-build --no-restore
+      - shell: pwsh
+        run: ./scripts/Test-ReleaseDecision.ps1
       - id: version
         shell: pwsh
-        run: |
-          [xml]$props = Get-Content Directory.Build.props
-          $version = [string]$props.Project.PropertyGroup.Version
-          if (-not $version) { throw "Directory.Build.props does not declare Version." }
-          $tag = "v$version"
-          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          $exists = $LASTEXITCODE -eq 0
-          "version=$version" >> $env:GITHUB_OUTPUT
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "exists=$($exists.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-      - if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/Get-ReleaseDecision.ps1 -Repository $env:GITHUB_REPOSITORY -OutputFile $env:GITHUB_OUTPUT
+      - if: steps.version.outputs.shouldRelease == 'true'
         run: dotnet tool install --global vpk --version 1.2.0
-      - if: steps.version.outputs.exists == 'false'
+      - if: steps.version.outputs.shouldRelease == 'true'
         shell: pwsh
         run: ./scripts/package.ps1 -Version "${{ steps.version.outputs.version }}" -SkipTests
-      - if: steps.version.outputs.exists == 'false'
+      - if: steps.version.outputs.shouldRelease == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}

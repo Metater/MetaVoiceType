@@ -24,8 +24,8 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
             progress?.Report(new("Verifying", new FileInfo(archive).Length, request.ExpectedBytes, 0));
             await VerifySha256Async(archive, request.ArchiveSha256!, cancellationToken).ConfigureAwait(false);
             progress?.Report(new("Extracting", new FileInfo(archive).Length, new FileInfo(archive).Length, 0));
-            if (request.ArchiveType.Equals("zip", StringComparison.OrdinalIgnoreCase)) await ExtractZipAsync(archive, work, cancellationToken).ConfigureAwait(false);
-            else if (request.ArchiveType.Equals("tar.bz2", StringComparison.OrdinalIgnoreCase)) await ExtractArchiveAsync(archive, work, cancellationToken).ConfigureAwait(false);
+            if (request.ArchiveType.Equals("zip", StringComparison.OrdinalIgnoreCase)) await ExtractZipAsync(archive, work, progress, cancellationToken).ConfigureAwait(false);
+            else if (request.ArchiveType.Equals("tar.bz2", StringComparison.OrdinalIgnoreCase)) await ExtractArchiveAsync(archive, work, progress, cancellationToken).ConfigureAwait(false);
             else if (request.ArchiveType.Equals("file", StringComparison.OrdinalIgnoreCase))
             {
                 if (request.RequiredFiles.Count != 1) throw new InvalidDataException("Direct-file artifacts must declare exactly one required file.");
@@ -114,7 +114,7 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
         if (total is not null && read != total) throw new InvalidDataException($"Download was incomplete ({read}/{total} bytes).");
     }
 
-    private static async Task ExtractZipAsync(string archivePath, string destination, CancellationToken cancellationToken)
+    private static async Task ExtractZipAsync(string archivePath, string destination, IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken)
     {
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
         foreach (ZipArchiveEntry entry in archive.Entries)
@@ -125,11 +125,11 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             await using Stream input = entry.Open();
             await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, true);
-            await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+            await CopyEntryAsync(input, output, entry.Length, entry.FullName, progress, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private static async Task ExtractArchiveAsync(string archivePath, string destination, CancellationToken cancellationToken)
+    private static async Task ExtractArchiveAsync(string archivePath, string destination, IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken)
     {
         await using FileStream stream = File.OpenRead(archivePath);
         using IReader reader = ReaderFactory.OpenReader(stream, new ReaderOptions());
@@ -142,7 +142,29 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             await using Stream input = reader.OpenEntryStream();
             await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024, true);
-            await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+            await CopyEntryAsync(input, output, entry.Size, entry.Key ?? "archive entry", progress, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task CopyEntryAsync(Stream input, Stream output, long totalBytes, string name,
+        IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken)
+    {
+        byte[] buffer = new byte[128 * 1024];
+        long written = 0;
+        var clock = Stopwatch.StartNew();
+        long lastProgressMilliseconds = -250;
+        while (true)
+        {
+            int count = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (count == 0) break;
+            await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
+            written += count;
+            if (clock.ElapsedMilliseconds - lastProgressMilliseconds >= 250 || written == totalBytes)
+            {
+                lastProgressMilliseconds = clock.ElapsedMilliseconds;
+                progress?.Report(new($"Extracting {Path.GetFileName(name)}", written, totalBytes > 0 ? totalBytes : null,
+                    written / Math.Max(clock.Elapsed.TotalSeconds, 0.01)));
+            }
         }
     }
 

@@ -34,14 +34,23 @@ public sealed partial class JsonSettingsStore(AppPaths paths, ILogger<JsonSettin
 
     internal static AppSettings Migrate(AppSettings settings)
     {
-        var aliases = settings.CommandAliases ?? new(StringComparer.OrdinalIgnoreCase);
-        foreach ((string language, Dictionary<string, string> commands) in settings.CommandOverrides ?? [])
+        var aliases = new Dictionary<string, Dictionary<string, List<string>>>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string language, Dictionary<string, List<string>> commands) in (settings.CommandAliases ?? [])
+                     .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
         {
-            if (!aliases.TryGetValue(language, out Dictionary<string, List<string>>? languageAliases))
-                aliases[language] = languageAliases = new(StringComparer.OrdinalIgnoreCase);
-            foreach ((string command, string phrase) in commands)
-                if (!languageAliases.ContainsKey(command) && !string.IsNullOrWhiteSpace(phrase))
-                    languageAliases[command] = [phrase];
+            foreach ((string command, List<string> values) in commands.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+                MergeAliases(aliases, language, command, values, settings.SchemaVersion);
+        }
+        foreach ((string language, Dictionary<string, string> commands) in (settings.CommandOverrides ?? [])
+                     .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            foreach ((string command, string phrase) in commands.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                string current = VoiceCommandKeys.Current(command);
+                if ((!aliases.TryGetValue(language, out Dictionary<string, List<string>>? languageAliases) || !languageAliases.ContainsKey(current)) &&
+                    !string.IsNullOrWhiteSpace(phrase))
+                    MergeAliases(aliases, language, command, [phrase], settings.SchemaVersion);
+            }
         }
 
         List<CustomVoiceCommand> customCommands = settings.CustomCommands ?? [];
@@ -73,7 +82,9 @@ public sealed partial class JsonSettingsStore(AppPaths paths, ILogger<JsonSettin
 
         return settings with
         {
-            SchemaVersion = 4,
+            SchemaVersion = 5,
+            OnboardingComplete = false,
+            SetupCompletedOnce = settings.SetupCompletedOnce || settings.OnboardingComplete,
             CommandOverrides = new(StringComparer.OrdinalIgnoreCase),
             CommandAliases = aliases,
             CustomCommands = customCommands,
@@ -88,11 +99,24 @@ public sealed partial class JsonSettingsStore(AppPaths paths, ILogger<JsonSettin
         .Distinct(StringComparer.OrdinalIgnoreCase)
         .ToList();
 
+    private static void MergeAliases(Dictionary<string, Dictionary<string, List<string>>> aliases, string language,
+        string command, IEnumerable<string> values, int sourceSchemaVersion)
+    {
+        if (!aliases.TryGetValue(language, out Dictionary<string, List<string>>? languageAliases))
+            aliases[language] = languageAliases = new(StringComparer.OrdinalIgnoreCase);
+        string current = VoiceCommandKeys.Current(command);
+        List<string> normalized = NormalizeAliases(values);
+        if (sourceSchemaVersion < 5 && command.Equals(VoiceCommandKeys.LegacyPasteHere, StringComparison.OrdinalIgnoreCase) &&
+            normalized.Count > 0 && normalized.All(x => x is "paste recording" or "paste here"))
+            normalized = ["paste recording", "paste here"];
+        languageAliases[current] = NormalizeAliases(languageAliases.GetValueOrDefault(current, []).Concat(normalized));
+    }
+
     public async Task SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { await AtomicJsonFile.WriteAsync(paths.SettingsFile, settings, cancellationToken).ConfigureAwait(false); }
+        try { await AtomicJsonFile.WriteAsync(paths.SettingsFile, Migrate(settings), cancellationToken).ConfigureAwait(false); }
         finally { _gate.Release(); }
     }
 

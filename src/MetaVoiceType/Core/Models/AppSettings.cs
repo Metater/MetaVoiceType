@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace MetaVoiceType.Core.Models;
 
 public enum AppTheme { Dark, Light, System }
@@ -38,8 +40,10 @@ public sealed class CustomVoiceCommand
 
 public sealed record AppSettings
 {
-    public int SchemaVersion { get; init; } = 4;
+    public int SchemaVersion { get; init; } = 5;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool OnboardingComplete { get; init; }
+    public bool SetupCompletedOnce { get; init; }
     public bool StartWithWindows { get; init; }
     public bool CheckForUpdates { get; init; } = true;
     public AppTheme Theme { get; init; } = AppTheme.System;

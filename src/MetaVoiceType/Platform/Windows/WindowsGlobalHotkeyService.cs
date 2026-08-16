@@ -42,6 +42,24 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
         catch (FormatException ex) { return Task.FromResult(new HotkeyChangeResult(false, ActiveGesture, ex.Message)); }
     }
 
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        Task? run;
+        lock (_gate)
+        {
+            run = _run;
+            if (run is null) return;
+            _hook.KeyPressed -= OnPressed;
+            _hook.KeyReleased -= OnReleased;
+            if (_hook.IsRunning) _hook.Stop();
+            _run = null;
+            _pressed.Clear();
+            _triggerHeld = false;
+        }
+        try { await run.WaitAsync(cancellationToken).ConfigureAwait(false); }
+        catch (HookException) { }
+    }
+
     private void OnPressed(object? sender, KeyboardHookEventArgs args)
     {
         if (args.IsEventSimulated) return;
@@ -76,9 +94,7 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
 
     public async ValueTask DisposeAsync()
     {
-        _hook.KeyPressed -= OnPressed; _hook.KeyReleased -= OnReleased;
-        if (_hook.IsRunning) _hook.Stop();
-        if (_run is not null) try { await _run.ConfigureAwait(false); } catch (HookException) { }
+        await StopAsync().ConfigureAwait(false);
         _hook.Dispose();
     }
 }

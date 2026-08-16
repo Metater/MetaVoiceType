@@ -30,6 +30,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
     private readonly SherpaRuntimeBootstrapper _runtime;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<ApplicationOrchestrator> _logger;
+    private readonly ApplicationActionCoordinator _actions;
     private readonly Dictionary<string, DictationSession> _sessions = new(StringComparer.Ordinal);
     private readonly Dictionary<IAsrBackend, int> _backendUsers = new(ReferenceEqualityComparer.Instance);
     private readonly HashSet<IAsrBackend> _retiredBackends = new(ReferenceEqualityComparer.Instance);
@@ -55,12 +56,12 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
     public ApplicationOrchestrator(IAudioCaptureService audio, IHistoryStore history, ISettingsStore settingsStore,
         PasteCoordinator paste, DecodeCoordinator decode, RecoveryWriter recovery, VoskCommandRecognizer commands,
         CustomCommandExecutor customCommands, RecordingEventShortcutPlayer recordingShortcuts,
-        IAudioCueService cues, MetaVoiceTypeState state, SherpaRuntimeBootstrapper runtime,
+        IAudioCueService cues, MetaVoiceTypeState state, ApplicationActionCoordinator actions, SherpaRuntimeBootstrapper runtime,
         ILoggerFactory loggerFactory, ILogger<ApplicationOrchestrator> logger)
     {
         _audio = audio; _history = history; _settingsStore = settingsStore; _paste = paste; _decode = decode; _recovery = recovery;
         _commands = commands; _customCommands = customCommands; _recordingShortcuts = recordingShortcuts; _cues = cues;
-        _state = state; _runtime = runtime; _loggerFactory = loggerFactory; _logger = logger;
+        _state = state; _actions = actions; _runtime = runtime; _loggerFactory = loggerFactory; _logger = logger;
         _audio.FrameReady += OnAudioFrame;
         _audio.LevelChanged += OnLevel;
         _decode.TranscriptChanged += OnTranscriptChanged;
@@ -70,6 +71,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
     }
 
     public MetaVoiceTypeState State => _state;
+    public ApplicationReadiness Readiness => _actions.Readiness;
     public AppSettings Settings => _settings;
     public bool IsTranscriptionReady => _backend is not null && _vadModelPath is not null;
     public string? ActiveVoiceCommandLanguageId => _activeVoiceLanguageId;
@@ -95,11 +97,13 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
             if (!_backendUsers.ContainsKey(backend)) _backendUsers[backend] = 0;
             if (previous is not null && !ReferenceEquals(previous, backend)) RetireBackend(previous);
         }
+        Readiness.SetDictationReady(true);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
-        _settings = await _settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false);
+        _settings = JsonSettingsStore.Migrate(await _settingsStore.LoadAsync(cancellationToken).ConfigureAwait(false));
+        Readiness.BeginInitialization(_settings.SetupCompletedOnce);
         _runtime.SetUserForceCpu(_settings.ForceCpuOnly);
         IReadOnlyList<TranscriptRecord> history = await _history.LoadAsync(cancellationToken).ConfigureAwait(false);
         await Dispatcher.UIThread.InvokeAsync(() =>
@@ -112,17 +116,20 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         try
         {
             await _audio.StartAsync(_settings.AudioDeviceId, cancellationToken).ConfigureAwait(false);
+            Readiness.SetMicrophoneReady(true);
             SetStatus("Finish setup to begin dictating.");
         }
         catch (Exception ex)
         {
             LogMicrophoneFailed(_logger, ex);
+            Readiness.SetMicrophoneReady(false);
             SetStatus("Microphone unavailable. Choose a capture device in Settings.");
         }
     }
 
     public async Task InitializeParakeetAsync(string modelDirectory, ModelArtifact model, string vadDirectory, CancellationToken cancellationToken = default)
     {
+        Readiness.SetDictationReady(false);
         if (model.Kind != ModelArtifactKinds.Dictation) throw new ArgumentException("A dictation artifact is required.", nameof(model));
         string vadPath = Path.Combine(vadDirectory, ModelCatalog.LoadBundled().Get("silero-vad").Files.Model!);
         if (!File.Exists(vadPath)) throw new FileNotFoundException("Silero VAD is not installed.", vadPath);
@@ -144,6 +151,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
             _state.ProviderFallbackReason = replacement.Status.FallbackReason;
             _state.DictationModelState = "Ready";
         });
+        Readiness.SetDictationReady(true);
         SetStatus("Ready");
         _ = RecoverInterruptedAsync();
     }
@@ -153,6 +161,8 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         IReadOnlyList<VoiceCommandDefinition> definitions = ResolveDefinitions(language);
         _commands.Load(modelDirectory, definitions, language.RestrictedGrammar != "unrestricted");
         lock (_gate) { _activeVoiceLanguageId = language.Id; _activeVoiceLanguage = language; }
+        Readiness.SetVoiceCommandsReady(true);
+        RefreshReadinessStatus();
         Dispatcher.UIThread.Post(() =>
         {
             _state.CommandListenerActive = true;
@@ -161,32 +171,43 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         });
     }
 
+    public void MarkVoiceCommandsUnavailable()
+    {
+        lock (_gate) { _activeVoiceLanguageId = null; _activeVoiceLanguage = null; }
+        Readiness.SetVoiceCommandsReady(false);
+        RefreshReadinessStatus();
+        Dispatcher.UIThread.Post(() =>
+        {
+            _state.CommandListenerActive = false;
+            _state.ActiveVoiceLanguageId = null;
+            _state.VoiceModelState = "Unavailable";
+        });
+    }
+
+    public void MarkDictationUnavailable() { Readiness.SetDictationReady(false); RefreshReadinessStatus(); }
+    public void CompleteStartupReadiness() { Readiness.CompleteInitialization(); RefreshReadinessStatus(); }
+
+    public async Task CompleteSetupAsync(CancellationToken cancellationToken = default)
+    {
+        if (!Readiness.RequiredCapabilitiesReady)
+            throw new InvalidOperationException("Setup cannot complete until the microphone, dictation engine, and voice-command recognizer are ready.");
+        AppSettings completed = _settings with { SetupCompletedOnce = true, OnboardingComplete = false };
+        await UpdateSettingsAsync(completed, cancellationToken).ConfigureAwait(false);
+        Readiness.MarkSetupCompleted();
+        RefreshReadinessStatus();
+    }
+
     public IReadOnlyDictionary<VoiceCommand, string> ResolvePhrases(VoiceCommandLanguage language)
     {
         return ResolveAliases(language).ToDictionary(x => x.Key, x => x.Value[0]);
     }
 
     public IReadOnlyDictionary<VoiceCommand, IReadOnlyList<string>> ResolveAliases(VoiceCommandLanguage language)
-    {
-        Dictionary<string, List<string>>? overrides = _settings.CommandAliases.GetValueOrDefault(language.Id);
-        return VoiceCommandKeys.All.ToDictionary(x => x.Key, x =>
-        {
-            if (overrides?.GetValueOrDefault(x.Value) is { Count: > 0 } configured) return (IReadOnlyList<string>)configured;
-            var defaults = new List<string> { language.Commands[x.Value] };
-            if (language.CommandAliases?.GetValueOrDefault(x.Value) is { Count: > 0 } catalogAliases) defaults.AddRange(catalogAliases);
-            return (IReadOnlyList<string>)defaults.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-        });
-    }
+        => VoiceCommandSchema.ResolveAliases(_settings, language);
 
     public IReadOnlyList<VoiceCommandDefinition> ResolveDefinitions(VoiceCommandLanguage language)
     {
-        var definitions = ResolveAliases(language).SelectMany(x => x.Value.Select(alias => VoiceCommandDefinition.BuiltIn(x.Key, alias))).ToList();
-        definitions.AddRange(_settings.CustomCommands.Where(x => x.Enabled && x.VoiceCommandLanguageId.Equals(language.Id, StringComparison.OrdinalIgnoreCase))
-            .SelectMany(x => x.Aliases.Select(alias => new VoiceCommandDefinition(x.Id, alias))));
-        string[] normalized = definitions.Select(x => CommandPhraseValidator.Normalize(x.Phrase)).ToArray();
-        if (normalized.Distinct(StringComparer.OrdinalIgnoreCase).Count() != normalized.Length)
-            throw new InvalidDataException("Voice commands contain an ambiguous duplicate phrase.");
-        return definitions;
+        return VoiceCommandSchema.BuildDefinitions(_settings, language);
     }
 
     public async Task UpdateCommandPhrasesAsync(string languageId, IReadOnlyDictionary<VoiceCommand, string> phrases, CancellationToken cancellationToken = default)
@@ -196,13 +217,11 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
 
     public async Task UpdateCommandAliasesAsync(string languageId, IReadOnlyDictionary<VoiceCommand, IReadOnlyList<string>> aliases, CancellationToken cancellationToken = default)
     {
-        foreach (IReadOnlyList<string> values in aliases.Values) CommandPhraseValidator.ValidateAliases(values);
-        string[] normalized = aliases.Values.SelectMany(x => x).Select(CommandPhraseValidator.Normalize).ToArray();
-        if (normalized.Distinct(StringComparer.OrdinalIgnoreCase).Count() != normalized.Length)
-            throw new InvalidDataException("Voice commands contain an ambiguous duplicate alias.");
+        IReadOnlyList<VoiceCommandDefinition> normalized = CommandPhraseValidator.NormalizeDefinitions(
+            aliases.Select(x => VoiceCommandDefinition.BuiltIn(x.Key, x.Value.ToArray())));
         var configured = _settings.CommandAliases.ToDictionary(x => x.Key,
             x => x.Value.ToDictionary(y => y.Key, y => y.Value.ToList(), StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
-        configured[languageId] = aliases.ToDictionary(x => VoiceCommandKeys.All[x.Key], x => x.Value.ToList());
+        configured[languageId] = normalized.ToDictionary(x => x.Id, x => x.Aliases.ToList(), StringComparer.OrdinalIgnoreCase);
         await UpdateSettingsAsync(_settings with { CommandAliases = configured }, cancellationToken).ConfigureAwait(false);
     }
 
@@ -211,6 +230,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
 
     private bool StartRecordingWithCue(VoiceCommand cue, long? preRollAfterSample = null, TranscriptRecord? continuation = null)
     {
+        if (!_actions.IsAllowed(ApplicationAction.ManualRecording)) return false;
         DictationSession session;
         lock (_gate)
         {
@@ -226,13 +246,15 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         }
         if (preRollAfterSample is long after)
             foreach (AudioFrame frame in _preRoll.Snapshot(after, Interlocked.Read(ref _audioSampleClock))) AcceptForSession(session, frame);
-        _ = _recordingShortcuts.RecordingStartedAsync(session.Id, _settings.RecordingStartedShortcut);
+        if (_actions.IsAllowed(ApplicationAction.RecordingEventShortcut))
+            _ = _recordingShortcuts.RecordingStartedAsync(session.Id, _settings.RecordingStartedShortcut);
         _cues.PlayAccepted(cue, _settings.CueVolume);
         return true;
     }
 
     public bool ContinueRecording(long? preRollAfterSample = null)
     {
+        if (!_actions.IsAllowed(ApplicationAction.ManualRecording)) return false;
         TranscriptRecord? latest = _state.History.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Text) && !x.Canceled);
         if (latest is null) { ShowFeedback("Nothing to continue"); _cues.PlayError(_settings.CueVolume); return false; }
         return StartRecordingWithCue(VoiceCommand.ContinueRecording, preRollAfterSample, latest);
@@ -240,6 +262,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
 
     public bool StopRecording(bool canceled = false, bool paste = false)
     {
+        lock (_gate) if (_active is null && !_actions.IsAllowed(ApplicationAction.ManualRecording)) return false;
         if (paste && _paste.Reserve() != PasteRequestResult.Accepted) { _cues.PlayError(_settings.CueVolume); return false; }
         DictationSession? session;
         IReadOnlyList<DictationSegment> tail;
@@ -255,13 +278,15 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
             SetRecordingState(false, null, paste ? "Preparing paste…" : "Finalizing…");
         }
         _decode.Finalize(session, tail);
-        _ = _recordingShortcuts.RecordingEndedAsync(session.Id, _settings.RecordingStoppedShortcut);
-        _cues.PlayAccepted(canceled ? VoiceCommand.CancelRecording : paste ? VoiceCommand.PasteHere : VoiceCommand.StopRecording, _settings.CueVolume);
+        if (_actions.IsAllowed(ApplicationAction.RecordingEventShortcut))
+            _ = _recordingShortcuts.RecordingEndedAsync(session.Id, _settings.RecordingStoppedShortcut);
+        _cues.PlayAccepted(canceled ? VoiceCommand.CancelRecording : paste ? VoiceCommand.PasteRecording : VoiceCommand.StopRecording, _settings.CueVolume);
         return true;
     }
 
     public PasteRequestResult PasteHere()
     {
+        if (!_actions.IsAllowed(ApplicationAction.PasteOrCopy)) return PasteRequestResult.Disabled;
         DictationSession? target;
         lock (_gate)
         {
@@ -277,7 +302,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
                     PasteRequestResult reservation = _paste.Reserve();
                     if (reservation != PasteRequestResult.Accepted) return reservation;
                     _pendingPasteSessionId = target.Id;
-                    _cues.PlayAccepted(VoiceCommand.PasteHere, _settings.CueVolume);
+                    _cues.PlayAccepted(VoiceCommand.PasteRecording, _settings.CueVolume);
                     return PasteRequestResult.Accepted;
                 }
             }
@@ -289,13 +314,15 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
 
     public PasteRequestResult PasteRecord(TranscriptRecord? record)
     {
+        if (!_actions.IsAllowed(ApplicationAction.PasteOrCopy)) return PasteRequestResult.Disabled;
         PasteRequestResult result = _paste.Queue(record?.Text ?? "", () => MarkPastedAsync(record));
-        if (result == PasteRequestResult.Accepted) _cues.PlayAccepted(VoiceCommand.PasteHere, _settings.CueVolume);
+        if (result == PasteRequestResult.Accepted) _cues.PlayAccepted(VoiceCommand.PasteRecording, _settings.CueVolume);
         else _cues.PlayError(_settings.CueVolume);
         return result;
     }
 
-    public Task CopyRecordAsync(TranscriptRecord record, CancellationToken cancellationToken = default) => _paste.CopyAsync(record.Text, cancellationToken);
+    public Task CopyRecordAsync(TranscriptRecord record, CancellationToken cancellationToken = default) => _actions.IsAllowed(ApplicationAction.PasteOrCopy)
+        ? _paste.CopyAsync(record.Text, cancellationToken) : Task.CompletedTask;
 
     public async Task DeleteRecordAsync(TranscriptRecord record, CancellationToken cancellationToken = default)
     {
@@ -313,6 +340,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
 
     public void CancelPaste()
     {
+        if (!_actions.IsAllowed(ApplicationAction.PasteOrCopy)) return;
         lock (_gate)
         {
             if (_pendingPasteSessionId is not null) _canceledPasteSessions.Add(_pendingPasteSessionId);
@@ -324,24 +352,58 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
 
     public async Task UpdateSettingsAsync(AppSettings settings, CancellationToken cancellationToken = default)
     {
-        if (!string.Equals(_settings.AudioDeviceId, settings.AudioDeviceId, StringComparison.Ordinal))
+        AppSettings normalizedSettings = JsonSettingsStore.Migrate(settings);
+        AppSettings previousSettings = _settings;
+        VoiceCommandSchema.ValidateSettings(normalizedSettings, VoiceCommandCatalog.LoadBundled());
+        bool audioChanged = !string.Equals(previousSettings.AudioDeviceId, normalizedSettings.AudioDeviceId, StringComparison.Ordinal);
+        if (audioChanged)
         {
             lock (_gate) if (_active is not null) throw new InvalidOperationException("Stop recording before changing the microphone.");
-            string? previous = _settings.AudioDeviceId;
             await _audio.StopAsync(cancellationToken).ConfigureAwait(false);
-            try { await _audio.StartAsync(settings.AudioDeviceId, cancellationToken).ConfigureAwait(false); }
-            catch { await _audio.StartAsync(previous, cancellationToken).ConfigureAwait(false); throw; }
+            try { await _audio.StartAsync(normalizedSettings.AudioDeviceId, cancellationToken).ConfigureAwait(false); Readiness.SetMicrophoneReady(true); }
+            catch { Readiness.SetMicrophoneReady(false); await _audio.StartAsync(previousSettings.AudioDeviceId, cancellationToken).ConfigureAwait(false); Readiness.SetMicrophoneReady(true); throw; }
         }
-        _settings = settings with { SchemaVersion = 4 };
-        _runtime.SetUserForceCpu(_settings.ForceCpuOnly);
-        await _settingsStore.SaveAsync(_settings, cancellationToken).ConfigureAwait(false);
         VoiceCommandLanguage? active;
         lock (_gate) active = _activeVoiceLanguage;
-        if (active is not null && _commands.IsReady) _commands.RebuildGrammar(ResolveDefinitions(active), active.RestrictedGrammar != "unrestricted");
+        IReadOnlyList<VoiceCommandDefinition>? definitions = active is not null && _commands.IsReady
+            ? VoiceCommandSchema.BuildDefinitions(normalizedSettings, active) : null;
+        IReadOnlyList<VoiceCommandDefinition>? previousDefinitions = active is not null && _commands.IsReady
+            ? VoiceCommandSchema.BuildDefinitions(previousSettings, active) : null;
+        try
+        {
+            if (active is not null && definitions is not null)
+                _commands.RebuildGrammar(definitions, active.RestrictedGrammar != "unrestricted");
+            await _settingsStore.SaveAsync(normalizedSettings, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception failure)
+        {
+            List<Exception>? rollbackFailures = null;
+            if (active is not null && previousDefinitions is not null) try
+            {
+                _commands.RebuildGrammar(previousDefinitions, active.RestrictedGrammar != "unrestricted");
+            }
+            catch (Exception rollbackFailure) { (rollbackFailures ??= []).Add(rollbackFailure); }
+            if (audioChanged)
+            {
+                try
+                {
+                    await _audio.StopAsync(cancellationToken).ConfigureAwait(false);
+                    await _audio.StartAsync(previousSettings.AudioDeviceId, cancellationToken).ConfigureAwait(false);
+                    Readiness.SetMicrophoneReady(true);
+                }
+                catch (Exception rollbackFailure) { (rollbackFailures ??= []).Add(rollbackFailure); Readiness.SetMicrophoneReady(false); }
+            }
+            if (rollbackFailures is not null)
+                throw new AggregateException("Settings activation failed and one or more rollback operations also failed.", [failure, .. rollbackFailures]);
+            throw;
+        }
+        _settings = normalizedSettings;
+        _runtime.SetUserForceCpu(_settings.ForceCpuOnly);
     }
 
     public async Task CopyCurrentAsync(CancellationToken cancellationToken = default)
     {
+        if (!_actions.IsAllowed(ApplicationAction.PasteOrCopy)) return;
         string text;
         lock (_gate)
         {
@@ -360,6 +422,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
 
     public async Task HandleAsync(VoiceCommandMatch match)
     {
+        if (!_actions.IsAllowed(match.Command is null ? ApplicationAction.CustomAutomation : ApplicationAction.VoiceCommand)) return;
         Interlocked.Increment(ref _commandSequence);
         DictationSession? session;
         lock (_gate) session = _active;
@@ -385,7 +448,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
             case VoiceCommand.StartRecording: StartRecording(match.AudioEndSample); break;
             case VoiceCommand.ContinueRecording: ContinueRecording(match.AudioEndSample); break;
             case VoiceCommand.StopRecording: StopRecording(); break;
-            case VoiceCommand.PasteHere: PasteHere(); break;
+            case VoiceCommand.PasteRecording: PasteHere(); break;
             case VoiceCommand.CancelRecording: StopRecording(canceled: true); break;
             case VoiceCommand.CancelPaste:
                 if (_pendingPasteSessionId is not null || _paste.IsActive) CancelPaste(); else _cues.PlayError(_settings.CueVolume);
@@ -403,8 +466,11 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         _preRoll.Add(startSample, frame);
         Interlocked.Exchange(ref _audioSampleClock, endSample);
         long sequence = Interlocked.Read(ref _commandSequence);
-        _commands.Accept(frame);
-        Interlocked.Increment(ref _voskFrames);
+        if (_actions.IsAllowed(ApplicationAction.VoiceCommand))
+        {
+            _commands.Accept(frame);
+            Interlocked.Increment(ref _voskFrames);
+        }
         if (Interlocked.Read(ref _commandSequence) != sequence) return;
         DictationSession? session;
         lock (_gate) session = _active;
@@ -543,6 +609,18 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         _state.IsRecording = recording; _state.RecordingStartedAt = started; _state.StatusMessage = status; if (recording) _state.LiveTranscript = "";
     });
     private void SetStatus(string status) => Dispatcher.UIThread.Post(() => _state.StatusMessage = status);
+    private void RefreshReadinessStatus()
+    {
+        string status = Readiness.State switch
+        {
+            ApplicationReadinessState.Ready => "Ready",
+            ApplicationReadinessState.Degraded when !Readiness.VoiceCommandsReady => "Degraded · voice commands unavailable; manual dictation remains ready.",
+            ApplicationReadinessState.Degraded => "Degraded · one or more capabilities need repair.",
+            ApplicationReadinessState.Initializing => "Getting ready…",
+            _ => "Finish setup to begin dictating."
+        };
+        SetStatus(status);
+    }
     private void ShowFeedback(string feedback) => Dispatcher.UIThread.Post(() => _state.TransientFeedback = feedback);
 
     public async ValueTask DisposeAsync()

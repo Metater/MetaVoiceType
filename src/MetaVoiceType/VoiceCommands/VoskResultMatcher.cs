@@ -35,35 +35,37 @@ public static class VoskResultMatcher
         {
             string text = CommandPhraseValidator.Normalize(alternative.Text);
             if (text.Length == 0 || text == "[unk]") continue;
-            var candidates = new List<(VoiceCommandDefinition Definition, int Position)>();
+            var candidates = new List<(VoiceCommandDefinition Definition, string Phrase, int Position)>();
             foreach (VoiceCommandDefinition definition in configured)
             {
-                string phrase = CommandPhraseValidator.Normalize(definition.Phrase);
-                int offset = 0;
-                while ((offset = text.IndexOf(phrase, offset, StringComparison.OrdinalIgnoreCase)) >= 0)
+                foreach (string configuredAlias in definition.Aliases)
                 {
-                    bool left = offset == 0 || char.IsWhiteSpace(text[offset - 1]);
-                    int end = offset + phrase.Length;
-                    bool right = end == text.Length || char.IsWhiteSpace(text[end]);
-                    if (left && right) candidates.Add((definition, offset));
-                    offset = Math.Max(end, offset + 1);
+                    string phrase = CommandPhraseValidator.Normalize(configuredAlias);
+                    int offset = 0;
+                    while ((offset = text.IndexOf(phrase, offset, StringComparison.OrdinalIgnoreCase)) >= 0)
+                    {
+                        bool left = offset == 0 || char.IsWhiteSpace(text[offset - 1]);
+                        int end = offset + phrase.Length;
+                        bool right = end == text.Length || char.IsWhiteSpace(text[end]);
+                        if (left && right) candidates.Add((definition, phrase, offset));
+                        offset = Math.Max(end, offset + 1);
+                    }
                 }
             }
 
             if (candidates.Count == 0) continue;
             DateTimeOffset acceptedAt = DateTimeOffset.UtcNow;
             return candidates
-                .Where(candidate => !candidates.Any(other => other.Position == candidate.Position && other.Definition.Phrase.Length > candidate.Definition.Phrase.Length
-                    && CommandPhraseValidator.Normalize(other.Definition.Phrase).Contains(CommandPhraseValidator.Normalize(candidate.Definition.Phrase), StringComparison.OrdinalIgnoreCase)))
-                .OrderBy(x => x.Position).ThenByDescending(x => x.Definition.Phrase.Length)
-                .Select(candidate => CreateMatch(candidate.Definition, candidate.Position, alternative, recognizerBaseSample, acceptedAt)).ToArray();
+                .Where(candidate => !candidates.Any(other => other.Position == candidate.Position && other.Phrase.Length > candidate.Phrase.Length
+                    && other.Phrase.Contains(candidate.Phrase, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(x => x.Position).ThenByDescending(x => x.Phrase.Length)
+                .Select(candidate => CreateMatch(candidate.Definition, candidate.Phrase, candidate.Position, alternative, recognizerBaseSample, acceptedAt)).ToArray();
         }
         return [];
     }
 
-    private static VoiceCommandMatch CreateMatch(VoiceCommandDefinition definition, int position, Alternative alternative, long baseSample, DateTimeOffset acceptedAt)
+    private static VoiceCommandMatch CreateMatch(VoiceCommandDefinition definition, string phrase, int position, Alternative alternative, long baseSample, DateTimeOffset acceptedAt)
     {
-        string phrase = CommandPhraseValidator.Normalize(definition.Phrase);
         string normalizedWords = string.Join(' ', alternative.Words.Select(x => CommandPhraseValidator.Normalize(x.Text)));
         int wordPhrasePosition = normalizedWords.IndexOf(phrase, StringComparison.OrdinalIgnoreCase);
         long? startSample = null;

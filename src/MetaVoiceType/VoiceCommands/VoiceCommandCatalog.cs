@@ -99,4 +99,63 @@ public static class CommandPhraseValidator
         if (normalized.Distinct(StringComparer.OrdinalIgnoreCase).Count() != normalized.Length)
             throw new InvalidDataException("Command aliases must be unique.");
     }
+
+    public static IReadOnlyList<VoiceCommandDefinition> NormalizeDefinitions(IEnumerable<VoiceCommandDefinition> definitions)
+    {
+        var normalized = new List<VoiceCommandDefinition>();
+        var actionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (VoiceCommandDefinition definition in definitions)
+        {
+            if (string.IsNullOrWhiteSpace(definition.Id) || !actionIds.Add(definition.Id))
+                throw new InvalidDataException("Voice commands contain a duplicate or empty action ID.");
+            if (definition.Aliases is null || definition.Aliases.Count == 0 || definition.Aliases.Any(string.IsNullOrWhiteSpace))
+                throw new InvalidDataException($"Voice command '{definition.Id}' needs at least one alias and cannot contain empty aliases.");
+            List<string> actionAliases = definition.Aliases.Select(Normalize)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            if (actionAliases.Any(x => x == "[unk]"))
+                throw new InvalidDataException($"Voice command '{definition.Id}' cannot use the reserved [unk] alias.");
+            foreach (string alias in actionAliases)
+            {
+                if (aliases.TryGetValue(alias, out string? owner) && !owner.Equals(definition.Id, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"Voice-command alias '{alias}' is ambiguous between '{owner}' and '{definition.Id}'.");
+                aliases[alias] = definition.Id;
+            }
+            normalized.Add(definition with { Aliases = actionAliases });
+        }
+        if (normalized.Count == 0) throw new InvalidDataException("At least one voice command is required.");
+        return normalized;
+    }
+}
+
+public static class VoiceCommandSchema
+{
+    public static void ValidateSettings(AppSettings settings, VoiceCommandCatalog catalog)
+    {
+        foreach (VoiceCommandLanguage language in catalog.Languages)
+            _ = BuildDefinitions(settings, language);
+    }
+
+    public static IReadOnlyDictionary<VoiceCommand, IReadOnlyList<string>> ResolveAliases(AppSettings settings, VoiceCommandLanguage language)
+    {
+        Dictionary<string, List<string>>? overrides = settings.CommandAliases.GetValueOrDefault(language.Id);
+        return VoiceCommandKeys.All.ToDictionary(x => x.Key, x =>
+        {
+            if (overrides?.GetValueOrDefault(x.Value) is { Count: > 0 } configured)
+                return (IReadOnlyList<string>)configured.Select(CommandPhraseValidator.Normalize)
+                    .Where(alias => alias.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var defaults = new List<string> { language.Commands[x.Value] };
+            if (language.CommandAliases?.GetValueOrDefault(x.Value) is { Count: > 0 } catalogAliases) defaults.AddRange(catalogAliases);
+            return (IReadOnlyList<string>)defaults.Select(CommandPhraseValidator.Normalize)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        });
+    }
+
+    public static IReadOnlyList<VoiceCommandDefinition> BuildDefinitions(AppSettings settings, VoiceCommandLanguage language)
+    {
+        var definitions = ResolveAliases(settings, language).Select(x => VoiceCommandDefinition.BuiltIn(x.Key, x.Value.ToArray())).ToList();
+        definitions.AddRange(settings.CustomCommands.Where(x => x.Enabled && x.VoiceCommandLanguageId.Equals(language.Id, StringComparison.OrdinalIgnoreCase))
+            .Select(x => new VoiceCommandDefinition(x.Id, x.Aliases)));
+        return CommandPhraseValidator.NormalizeDefinitions(definitions);
+    }
 }

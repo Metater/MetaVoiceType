@@ -26,18 +26,18 @@ public sealed partial class VoskCommandRecognizer(ILogger<VoskCommandRecognizer>
 
     public void Load(string modelPath, IReadOnlyList<VoiceCommandDefinition> definitions, bool restrictedGrammar = true)
     {
-        Validate(definitions);
-        bool useRestrictedGrammar = restrictedGrammar && SupportsManagedGrammar(definitions);
+        IReadOnlyList<VoiceCommandDefinition> normalized = CommandPhraseValidator.NormalizeDefinitions(definitions);
+        bool useRestrictedGrammar = restrictedGrammar && SupportsManagedGrammar(normalized);
         var replacementModel = new Model(modelPath);
         VoskRecognizer replacementRecognizer;
-        try { replacementRecognizer = Create(replacementModel, definitions, useRestrictedGrammar); }
+        try { replacementRecognizer = Create(replacementModel, normalized, useRestrictedGrammar); }
         catch { replacementModel.Dispose(); throw; }
         lock (_gate)
         {
             VoskRecognizer? previousRecognizer = _recognizer;
             Model? previousModel = _model;
             _model = replacementModel;
-            _definitions = definitions.ToArray();
+            _definitions = normalized;
             _recognizer = replacementRecognizer;
             _recognizerBaseSample = _globalSamples;
             previousRecognizer?.Dispose(); previousModel?.Dispose();
@@ -51,15 +51,15 @@ public sealed partial class VoskCommandRecognizer(ILogger<VoskCommandRecognizer>
 
     public void RebuildGrammar(IReadOnlyList<VoiceCommandDefinition> definitions, bool restrictedGrammar = true)
     {
-        Validate(definitions);
+        IReadOnlyList<VoiceCommandDefinition> normalized = CommandPhraseValidator.NormalizeDefinitions(definitions);
         lock (_gate)
         {
             if (_model is null) throw new InvalidOperationException("Vosk model is not loaded.");
-            bool useRestrictedGrammar = restrictedGrammar && SupportsManagedGrammar(definitions);
-            VoskRecognizer replacement = Create(_model, definitions, useRestrictedGrammar);
+            bool useRestrictedGrammar = restrictedGrammar && SupportsManagedGrammar(normalized);
+            VoskRecognizer replacement = Create(_model, normalized, useRestrictedGrammar);
             _recognizer?.Dispose();
             _recognizer = replacement;
-            _definitions = definitions.ToArray();
+            _definitions = normalized;
             _recognizerBaseSample = _globalSamples;
             if (restrictedGrammar && !useRestrictedGrammar) LogUnicodeFallback(logger);
         }
@@ -67,21 +67,18 @@ public sealed partial class VoskCommandRecognizer(ILogger<VoskCommandRecognizer>
 
     private static VoskRecognizer Create(Model model, IReadOnlyList<VoiceCommandDefinition> definitions, bool restricted)
     {
-        string grammar = JsonSerializer.Serialize(definitions.Select(x => CommandPhraseValidator.Normalize(x.Phrase)).Append("[unk]").Distinct(), GrammarJsonOptions);
+        string grammar = BuildGrammar(definitions);
         var recognizer = restricted ? new VoskRecognizer(model, AudioFrame.SampleRate, grammar) : new VoskRecognizer(model, AudioFrame.SampleRate);
         recognizer.SetMaxAlternatives(3);
         recognizer.SetWords(true);
         return recognizer;
     }
 
-    private static void Validate(IReadOnlyList<VoiceCommandDefinition> definitions)
-    {
-        if (definitions.Count == 0) throw new InvalidDataException("At least one voice command is required.");
-        CommandPhraseValidator.Validate(definitions.ToDictionary(x => x.Id, x => x.Phrase, StringComparer.Ordinal));
-    }
+    internal static string BuildGrammar(IReadOnlyList<VoiceCommandDefinition> definitions) => JsonSerializer.Serialize(
+        CommandPhraseValidator.NormalizeDefinitions(definitions).SelectMany(x => x.Aliases).Append("[unk]"), GrammarJsonOptions);
 
     internal static bool SupportsManagedGrammar(IReadOnlyDictionary<VoiceCommand, string> phrases) => phrases.Values.All(IsAscii);
-    internal static bool SupportsManagedGrammar(IReadOnlyList<VoiceCommandDefinition> definitions) => definitions.All(x => IsAscii(x.Phrase));
+    internal static bool SupportsManagedGrammar(IReadOnlyList<VoiceCommandDefinition> definitions) => definitions.SelectMany(x => x.Aliases).All(IsAscii);
     private static bool IsAscii(string value) => value.All(character => character <= 0x7f);
 
     public void Accept(AudioFrame frame)

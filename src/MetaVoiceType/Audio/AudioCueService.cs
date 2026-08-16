@@ -18,7 +18,7 @@ public sealed class AudioCueService : IAudioCueService
         VoiceCommand.StartRecording => (660, 90),
         VoiceCommand.ContinueRecording => (600, 105),
         VoiceCommand.StopRecording => (520, 90),
-        VoiceCommand.PasteHere => (780, 90),
+        VoiceCommand.PasteRecording => (780, 90),
         VoiceCommand.CancelRecording => (360, 110),
         VoiceCommand.CancelPaste => (320, 120),
         VoiceCommand.CopyRecordingToClipboard => (880, 75),

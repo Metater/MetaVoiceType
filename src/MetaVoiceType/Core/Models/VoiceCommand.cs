@@ -5,7 +5,7 @@ public enum VoiceCommand
     StartRecording,
     ContinueRecording,
     StopRecording,
-    PasteHere,
+    PasteRecording,
     CancelRecording,
     CancelPaste,
     CopyRecordingToClipboard
@@ -18,14 +18,20 @@ public static class VoiceCommandKeys
         [VoiceCommand.StartRecording] = "startRecording",
         [VoiceCommand.ContinueRecording] = "continueRecording",
         [VoiceCommand.StopRecording] = "stopRecording",
-        [VoiceCommand.PasteHere] = "pasteHere",
+        [VoiceCommand.PasteRecording] = "pasteRecording",
         [VoiceCommand.CancelRecording] = "cancelRecording",
         [VoiceCommand.CancelPaste] = "cancelPaste",
         [VoiceCommand.CopyRecordingToClipboard] = "copyRecordingToClipboard"
     };
+
+    public const string LegacyPasteHere = "pasteHere";
+
+    public static string Current(string id) => id.Equals(LegacyPasteHere, StringComparison.OrdinalIgnoreCase)
+        ? All[VoiceCommand.PasteRecording]
+        : id;
 }
 
-public sealed record VoiceCommandDefinition(string Id, string Phrase, VoiceCommand? BuiltInCommand = null)
+public sealed record VoiceCommandDefinition(string Id, IReadOnlyList<string> Aliases, VoiceCommand? BuiltInCommand = null)
 {
-    public static VoiceCommandDefinition BuiltIn(VoiceCommand command, string phrase) => new(VoiceCommandKeys.All[command], phrase, command);
+    public static VoiceCommandDefinition BuiltIn(VoiceCommand command, params string[] aliases) => new(VoiceCommandKeys.All[command], aliases, command);
 }

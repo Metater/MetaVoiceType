@@ -12,5 +12,6 @@ public interface IGlobalHotkeyService : IAsyncDisposable
     event EventHandler? ToggleRecording;
     string ActiveGesture { get; }
     Task StartAsync(string gesture = "Ctrl+Space", CancellationToken cancellationToken = default);
+    Task StopAsync(CancellationToken cancellationToken = default);
     Task<HotkeyChangeResult> ChangeAsync(string gesture, CancellationToken cancellationToken = default);
 }

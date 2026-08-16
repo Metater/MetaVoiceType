@@ -25,18 +25,19 @@ public sealed class OrchestratorRaceTests
         history.Records.Add(new("prior", priorTime, priorTime.AddSeconds(1), DictationStatus.Completed, "auto", "Prior text.", false, false, false, "prior"));
         var settings = new FakeSettings(new AppSettings
         {
-            OnboardingComplete = true,
+            SetupCompletedOnce = true,
             CopyOnStop = false,
             RecordingStartedShortcut = "Ctrl+Shift+M",
             RecordingStoppedShortcut = "Ctrl+Shift+M"
         });
         var input = new FakeInput();
+        var readiness = new ApplicationReadiness();
         using var paste = new PasteCoordinator(new FakeClipboard(), new FakeInsertion(), NullLogger<PasteCoordinator>.Instance);
         var orchestrator = new ApplicationOrchestrator(audio, history, settings, paste,
             new DecodeCoordinator(NullLogger<DecodeCoordinator>.Instance), new RecoveryWriter(paths, NullLogger<RecoveryWriter>.Instance),
             new VoskCommandRecognizer(NullLogger<VoskCommandRecognizer>.Instance),
             new CustomCommandExecutor(input, NullLogger<CustomCommandExecutor>.Instance), new RecordingEventShortcutPlayer(input),
-            new FakeCues(), new MetaVoiceTypeState(),
+            new FakeCues(), new MetaVoiceTypeState(), new ApplicationActionCoordinator(readiness),
             new SherpaRuntimeBootstrapper(paths, new(false, false, false, true, false, false, null, "auto"), NullLogger<SherpaRuntimeBootstrapper>.Instance),
             NullLoggerFactory.Instance, NullLogger<ApplicationOrchestrator>.Instance)
         { SegmenterFactory = _ => new FlushSegmenter([]) };
@@ -44,6 +45,8 @@ public sealed class OrchestratorRaceTests
         {
             await orchestrator.InitializeAsync(TestContext.Current.CancellationToken);
             orchestrator.SetBackendForTesting(new BlockingBackend(""));
+            readiness.SetVoiceCommandsReady(true);
+            orchestrator.CompleteStartupReadiness();
 
             Assert.True(orchestrator.StartRecording()); Assert.True(orchestrator.StopRecording());
             Assert.True(orchestrator.StartRecording()); Assert.Equal(PasteRequestResult.Accepted, orchestrator.PasteHere());
@@ -63,7 +66,7 @@ public sealed class OrchestratorRaceTests
         var paths = new AppPaths(root);
         var audio = new FakeAudio();
         var history = new FakeHistory();
-        var settings = new FakeSettings(new AppSettings { OnboardingComplete = true, CopyOnStop = false });
+        var settings = new FakeSettings(new AppSettings { SetupCompletedOnce = true, CopyOnStop = false });
         var clipboard = new FakeClipboard();
         var insertion = new FakeInsertion();
         using var paste = new PasteCoordinator(clipboard, insertion, NullLogger<PasteCoordinator>.Instance);
@@ -75,7 +78,7 @@ public sealed class OrchestratorRaceTests
         var runtime = new SherpaRuntimeBootstrapper(paths, new(false, false, false, true, false, false, null, "auto"), NullLogger<SherpaRuntimeBootstrapper>.Instance);
         var orchestrator = new ApplicationOrchestrator(audio, history, settings, paste, decode, recovery, commands,
             new CustomCommandExecutor(new FakeInput(), NullLogger<CustomCommandExecutor>.Instance), shortcutPlayer,
-            new FakeCues(), new MetaVoiceTypeState(), runtime, NullLoggerFactory.Instance, NullLogger<ApplicationOrchestrator>.Instance)
+            new FakeCues(), new MetaVoiceTypeState(), new ApplicationActionCoordinator(new ApplicationReadiness()), runtime, NullLoggerFactory.Instance, NullLogger<ApplicationOrchestrator>.Instance)
         {
             SegmenterFactory = _ => new FlushSegmenter(new float[4_000])
         };
@@ -84,6 +87,7 @@ public sealed class OrchestratorRaceTests
         {
             await orchestrator.InitializeAsync(token);
             orchestrator.SetBackendForTesting(backend);
+            orchestrator.CompleteStartupReadiness();
             Assert.True(orchestrator.StartRecording());
             audio.Emit(Pcm16Converter.Convert(new byte[8_000]));
             Assert.True(orchestrator.StopRecording());
@@ -119,11 +123,11 @@ public sealed class OrchestratorRaceTests
         var state = new MetaVoiceTypeState();
         using var paste = new PasteCoordinator(new FakeClipboard(), insertion, NullLogger<PasteCoordinator>.Instance);
         var backend = new BlockingBackend("recording A");
-        var orchestrator = new ApplicationOrchestrator(audio, history, new FakeSettings(new AppSettings { OnboardingComplete = true, CopyOnStop = false }), paste,
+        var orchestrator = new ApplicationOrchestrator(audio, history, new FakeSettings(new AppSettings { SetupCompletedOnce = true, CopyOnStop = false }), paste,
             new DecodeCoordinator(NullLogger<DecodeCoordinator>.Instance), new RecoveryWriter(paths, NullLogger<RecoveryWriter>.Instance),
             new VoskCommandRecognizer(NullLogger<VoskCommandRecognizer>.Instance),
             new CustomCommandExecutor(new FakeInput(), NullLogger<CustomCommandExecutor>.Instance), new RecordingEventShortcutPlayer(new FakeInput()),
-            new FakeCues(), state,
+            new FakeCues(), state, new ApplicationActionCoordinator(new ApplicationReadiness()),
             new SherpaRuntimeBootstrapper(paths, new(false, false, false, true, false, false, null, "auto"), NullLogger<SherpaRuntimeBootstrapper>.Instance),
             NullLoggerFactory.Instance, NullLogger<ApplicationOrchestrator>.Instance)
         { SegmenterFactory = _ => new FlushSegmenter(new float[4_000]) };
@@ -132,6 +136,7 @@ public sealed class OrchestratorRaceTests
         {
             await orchestrator.InitializeAsync(token);
             orchestrator.SetBackendForTesting(backend);
+            orchestrator.CompleteStartupReadiness();
             Assert.True(orchestrator.StartRecording());
             audio.Emit(Pcm16Converter.Convert(new byte[8_000]));
             Assert.Equal(PasteRequestResult.Accepted, orchestrator.PasteHere());
@@ -157,6 +162,48 @@ public sealed class OrchestratorRaceTests
             await orchestrator.DisposeAsync();
             if (Directory.Exists(root)) Directory.Delete(root, true);
         }
+    }
+
+    [AvaloniaFact]
+    public async Task SetupIncompleteBlocksRecordingCustomAutomationCuesAndRecordingEventShortcuts()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "MetaVoiceType.Tests", Guid.NewGuid().ToString("N"));
+        var paths = new AppPaths(root);
+        var input = new FakeInput();
+        var cues = new FakeCues();
+        var command = new CustomVoiceCommand
+        {
+            Id = "blocked", Name = "Blocked", Phrase = "run blocked", Aliases = ["run blocked"],
+            CommandType = CustomCommandType.KeyboardShortcut, Shortcut = "Ctrl+Shift+B"
+        };
+        var settings = new FakeSettings(new AppSettings
+        {
+            SetupCompletedOnce = false,
+            RecordingStartedShortcut = "Ctrl+Shift+M",
+            RecordingStoppedShortcut = "Ctrl+Shift+M",
+            CustomCommands = [command]
+        });
+        using var paste = new PasteCoordinator(new FakeClipboard(), new FakeInsertion(), NullLogger<PasteCoordinator>.Instance);
+        var orchestrator = new ApplicationOrchestrator(new FakeAudio(), new FakeHistory(), settings, paste,
+            new DecodeCoordinator(NullLogger<DecodeCoordinator>.Instance), new RecoveryWriter(paths, NullLogger<RecoveryWriter>.Instance),
+            new VoskCommandRecognizer(NullLogger<VoskCommandRecognizer>.Instance),
+            new CustomCommandExecutor(input, NullLogger<CustomCommandExecutor>.Instance), new RecordingEventShortcutPlayer(input),
+            cues, new MetaVoiceTypeState(), new ApplicationActionCoordinator(new ApplicationReadiness()),
+            new SherpaRuntimeBootstrapper(paths, new(false, false, false, true, false, false, null, "auto"), NullLogger<SherpaRuntimeBootstrapper>.Instance),
+            NullLoggerFactory.Instance, NullLogger<ApplicationOrchestrator>.Instance);
+        try
+        {
+            await orchestrator.InitializeAsync(TestContext.Current.CancellationToken);
+            orchestrator.SetBackendForTesting(new BlockingBackend(""));
+            orchestrator.CompleteStartupReadiness();
+
+            Assert.False(orchestrator.StartRecording());
+            Assert.Equal(PasteRequestResult.Disabled, orchestrator.PasteHere());
+            await orchestrator.HandleAsync(new VoiceCommandMatch(command.Id, null, "run blocked", "run blocked", 0, null, null, null, DateTimeOffset.UtcNow));
+            Assert.Empty(input.Values);
+            Assert.Equal(0, cues.PlayCount);
+        }
+        finally { await orchestrator.DisposeAsync(); if (Directory.Exists(root)) Directory.Delete(root, true); }
     }
 
     private sealed class BlockingBackend(string text) : IAsrBackend
@@ -235,9 +282,10 @@ public sealed class OrchestratorRaceTests
 
     private sealed class FakeCues : IAudioCueService
     {
-        public void PlayAccepted(VoiceCommand command, double volume) { }
-        public void PlayError(double volume) { }
-        public void PlayRecovered(double volume) { }
+        public int PlayCount { get; private set; }
+        public void PlayAccepted(VoiceCommand command, double volume) { PlayCount++; }
+        public void PlayError(double volume) { PlayCount++; }
+        public void PlayRecovered(double volume) { PlayCount++; }
     }
 
 }

@@ -21,12 +21,12 @@
         "startRecording": "start recording",
         "continueRecording": "continue recording",
         "stopRecording": "stop recording",
-        "pasteHere": "paste recording",
+        "pasteRecording": "paste recording",
         "cancelRecording": "cancel recording",
         "cancelPaste": "cancel paste",
         "copyRecordingToClipboard": "copy recording to clipboard"
       },
-      "commandAliases": { "pasteHere": ["paste here"] }
+      "commandAliases": { "pasteRecording": ["paste here"] }
     },
     {
       "id": "ru",
@@ -47,7 +47,7 @@
         "startRecording": "начать запись",
         "continueRecording": "продолжить запись",
         "stopRecording": "остановить запись",
-        "pasteHere": "вставить запись",
+        "pasteRecording": "вставить запись",
         "cancelRecording": "отменить запись",
         "cancelPaste": "отменить вставку",
         "copyRecordingToClipboard": "копировать запись в буфер"
@@ -72,7 +72,7 @@
         "startRecording": "commencer l'enregistrement",
         "continueRecording": "reprendre l'enregistrement",
         "stopRecording": "arrêter l'enregistrement",
-        "pasteHere": "coller l'enregistrement",
+        "pasteRecording": "coller l'enregistrement",
         "cancelRecording": "annuler l'enregistrement",
         "cancelPaste": "annuler le collage",
         "copyRecordingToClipboard": "copier l'enregistrement"
@@ -97,7 +97,7 @@
         "startRecording": "aufnahme starten",
         "continueRecording": "aufnahme fortsetzen",
         "stopRecording": "aufnahme stoppen",
-        "pasteHere": "aufnahme einfügen",
+        "pasteRecording": "aufnahme einfügen",
         "cancelRecording": "aufnahme abbrechen",
         "cancelPaste": "einfügen abbrechen",
         "copyRecordingToClipboard": "aufnahme kopieren"
@@ -122,7 +122,7 @@
         "startRecording": "iniciar grabación",
         "continueRecording": "continuar grabación",
         "stopRecording": "detener grabación",
-        "pasteHere": "pegar grabación",
+        "pasteRecording": "pegar grabación",
         "cancelRecording": "cancelar grabación",
         "cancelPaste": "cancelar pegado",
         "copyRecordingToClipboard": "copiar grabación al portapapeles"
@@ -147,7 +147,7 @@
         "startRecording": "iniciar gravação",
         "continueRecording": "continuar gravação",
         "stopRecording": "parar gravação",
-        "pasteHere": "colar gravação",
+        "pasteRecording": "colar gravação",
         "cancelRecording": "cancelar gravação",
         "cancelPaste": "cancelar colagem",
         "copyRecordingToClipboard": "copiar gravação"
@@ -172,7 +172,7 @@
         "startRecording": "inizia registrazione",
         "continueRecording": "continua registrazione",
         "stopRecording": "ferma registrazione",
-        "pasteHere": "incolla registrazione",
+        "pasteRecording": "incolla registrazione",
         "cancelRecording": "annulla registrazione",
         "cancelPaste": "annulla incolla",
         "copyRecordingToClipboard": "copia registrazione"
@@ -197,7 +197,7 @@
         "startRecording": "opname starten",
         "continueRecording": "opname voortzetten",
         "stopRecording": "opname stoppen",
-        "pasteHere": "opname plakken",
+        "pasteRecording": "opname plakken",
         "cancelRecording": "opname annuleren",
         "cancelPaste": "plakken annuleren",
         "copyRecordingToClipboard": "opname kopiëren"
@@ -222,7 +222,7 @@
         "startRecording": "почати запис",
         "continueRecording": "продовжити запис",
         "stopRecording": "зупинити запис",
-        "pasteHere": "вставити запис",
+        "pasteRecording": "вставити запис",
         "cancelRecording": "скасувати запис",
         "cancelPaste": "скасувати вставку",
         "copyRecordingToClipboard": "скопіювати запис"
@@ -247,7 +247,7 @@
         "startRecording": "starta inspelning",
         "continueRecording": "fortsätt inspelning",
         "stopRecording": "stoppa inspelning",
-        "pasteHere": "klistra in inspelning",
+        "pasteRecording": "klistra in inspelning",
         "cancelRecording": "avbryt inspelning",
         "cancelPaste": "avbryt inklistring",
         "copyRecordingToClipboard": "kopiera inspelning"
@@ -272,7 +272,7 @@
         "startRecording": "spustit nahrávání",
         "continueRecording": "pokračovat v nahrávání",
         "stopRecording": "zastavit nahrávání",
-        "pasteHere": "vložit nahrávku",
+        "pasteRecording": "vložit nahrávku",
         "cancelRecording": "zrušit nahrávání",
         "cancelPaste": "zrušit vložení",
         "copyRecordingToClipboard": "kopírovat nahrávku"
@@ -297,7 +297,7 @@
         "startRecording": "rozpocznij nagrywanie",
         "continueRecording": "kontynuuj nagrywanie",
         "stopRecording": "zatrzymaj nagrywanie",
-        "pasteHere": "wklej nagranie",
+        "pasteRecording": "wklej nagranie",
         "cancelRecording": "anuluj nagrywanie",
         "cancelPaste": "anuluj wklejanie",
         "copyRecordingToClipboard": "kopiuj nagranie"

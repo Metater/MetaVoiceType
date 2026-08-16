@@ -46,6 +46,9 @@ public static class AppServices
             services.AddSingleton<IGlobalHotkeyService, WindowsGlobalHotkeyService>();
             services.AddSingleton<IUpdateService, VelopackUpdateService>();
             services.AddSingleton<MetaVoiceTypeState>();
+            services.AddSingleton<ApplicationReadiness>();
+            services.AddSingleton<ApplicationActionCoordinator>();
+            services.AddSingleton<GlobalHotkeyRegistration>();
             services.AddSingleton<PasteCoordinator>();
             services.AddSingleton<DecodeCoordinator>();
             services.AddSingleton<RecoveryWriter>();
@@ -61,7 +64,7 @@ public static class AppServices
         if (options.ResetOnboarding)
         {
             ISettingsStore store = Host.Services.GetRequiredService<ISettingsStore>();
-            var settings = store.LoadAsync().GetAwaiter().GetResult() with { OnboardingComplete = false };
+            var settings = store.LoadAsync().GetAwaiter().GetResult() with { OnboardingComplete = false, SetupCompletedOnce = false };
             store.SaveAsync(settings).GetAwaiter().GetResult();
         }
     }

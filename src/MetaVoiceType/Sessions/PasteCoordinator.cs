@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace MetaVoiceType.Sessions;
 
-public enum PasteRequestResult { Accepted, AlreadyPending, NoText }
+public enum PasteRequestResult { Accepted, AlreadyPending, NoText, Disabled }
 public enum PasteRequestState { Idle, Queued, Preparing, Pasting, Succeeded, Failed, Canceled }
 
 public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextInsertionService insertion, ILogger<PasteCoordinator> logger) : IDisposable

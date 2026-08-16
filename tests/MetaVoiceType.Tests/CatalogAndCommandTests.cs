@@ -59,7 +59,7 @@ public sealed class CatalogAndCommandTests
     [Fact]
     public void MatcherIgnoresConfidenceAndUsesAlternativeOrder()
     {
-        var phrases = new Dictionary<VoiceCommand, string> { [VoiceCommand.StartRecording] = "start recording", [VoiceCommand.PasteHere] = "paste here" };
+        var phrases = new Dictionary<VoiceCommand, string> { [VoiceCommand.StartRecording] = "start recording", [VoiceCommand.PasteRecording] = "paste here" };
         string json = JsonSerializer.Serialize(new { alternatives = new[] { new { text = "start recording", confidence = 0.01 }, new { text = "paste here", confidence = 0.99 } } });
         VoiceCommandMatch match = Assert.Single(VoskResultMatcher.Match(json, phrases));
         Assert.Equal(VoiceCommand.StartRecording, match.Command);
@@ -68,10 +68,10 @@ public sealed class CatalogAndCommandTests
     [Fact]
     public void MatcherEmitsCommandsInSpokenOrderAndPrefersLongerPhrase()
     {
-        var phrases = new Dictionary<VoiceCommand, string> { [VoiceCommand.StopRecording] = "stop", [VoiceCommand.CancelRecording] = "stop recording", [VoiceCommand.PasteHere] = "paste here" };
+        var phrases = new Dictionary<VoiceCommand, string> { [VoiceCommand.StopRecording] = "stop", [VoiceCommand.CancelRecording] = "stop recording", [VoiceCommand.PasteRecording] = "paste here" };
         const string json = "{\"text\":\"please stop recording then paste here\"}";
         IReadOnlyList<VoiceCommandMatch> matches = VoskResultMatcher.Match(json, phrases);
-        Assert.Equal([VoiceCommand.CancelRecording, VoiceCommand.PasteHere], matches.Select(x => x.Command));
+        Assert.Equal([VoiceCommand.CancelRecording, VoiceCommand.PasteRecording], matches.Select(x => x.Command));
     }
 
     [Fact]

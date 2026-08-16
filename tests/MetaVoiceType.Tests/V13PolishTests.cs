@@ -33,8 +33,8 @@ public sealed class V13PolishTests : IDisposable
 
         AppSettings migrated = JsonSettingsStore.Migrate(legacy);
 
-        Assert.Equal(4, migrated.SchemaVersion);
-        Assert.Equal(["put it here"], migrated.CommandAliases["en-us"]["pasteHere"]);
+        Assert.Equal(5, migrated.SchemaVersion);
+        Assert.Equal(["put it here"], migrated.CommandAliases["en-us"]["pasteRecording"]);
         Assert.Equal(["open notes"], Assert.Single(migrated.CustomCommands).Aliases);
         Assert.Equal(2, migrated.WordReplacementGroups.Count);
         Assert.Equal(["meta voice", "meta voice type"], migrated.WordReplacementGroups.Single(x => x.Replacement == "MetaVoiceType").Matches);
@@ -44,8 +44,8 @@ public sealed class V13PolishTests : IDisposable
     public void EnglishPasteRecordingKeepsPasteHereAsSecondaryDefaultAlias()
     {
         VoiceCommandLanguage english = VoiceCommandCatalog.LoadBundled().Get("en-us");
-        Assert.Equal("paste recording", english.Commands["pasteHere"]);
-        Assert.Contains("paste here", english.CommandAliases!["pasteHere"]);
+        Assert.Equal("paste recording", english.Commands["pasteRecording"]);
+        Assert.Contains("paste here", english.CommandAliases!["pasteRecording"]);
     }
 
     [Fact]

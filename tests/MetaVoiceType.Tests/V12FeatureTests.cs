@@ -138,7 +138,7 @@ public sealed class V12FeatureTests : IDisposable
     {
         Assert.Equal(AppTheme.System, new AppSettings().Theme);
         AppSettings migrated = JsonSettingsStore.Migrate(new AppSettings { SchemaVersion = 2, Theme = AppTheme.Light, ToggleHotkey = "Ctrl+K" });
-        Assert.Equal(4, migrated.SchemaVersion);
+        Assert.Equal(5, migrated.SchemaVersion);
         Assert.Equal(AppTheme.Light, migrated.Theme);
         Assert.Equal("Ctrl+K", migrated.ToggleHotkey);
     }
