@@ -15,6 +15,17 @@ public sealed class WindowsTextInsertionService : ITextInsertionService, IKeyboa
     public Task SendShortcutAsync(ShortcutGesture shortcut, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (shortcut.IsMouse)
+        {
+            PressModifiers(shortcut);
+            try
+            {
+                EnsureSuccess(_simulator.SimulateMousePress(shortcut.MouseButton), shortcut.MouseButton, "press");
+                EnsureSuccess(_simulator.SimulateMouseRelease(shortcut.MouseButton), shortcut.MouseButton, "release");
+            }
+            finally { ReleaseModifiers(shortcut); }
+            return Task.CompletedTask;
+        }
         var pressed = new List<KeyCode>();
         try
         {
@@ -42,6 +53,13 @@ public sealed class WindowsTextInsertionService : ITextInsertionService, IKeyboa
     public Task PressShortcutAsync(ShortcutGesture shortcut, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (shortcut.IsMouse)
+        {
+            PressModifiers(shortcut);
+            try { EnsureSuccess(_simulator.SimulateMousePress(shortcut.MouseButton), shortcut.MouseButton, "press"); }
+            catch { ReleaseModifiers(shortcut); throw; }
+            return Task.CompletedTask;
+        }
         var pressed = new List<KeyCode>();
         try
         {
@@ -62,6 +80,12 @@ public sealed class WindowsTextInsertionService : ITextInsertionService, IKeyboa
     public Task ReleaseShortcutAsync(ShortcutGesture shortcut, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (shortcut.IsMouse)
+        {
+            EnsureSuccess(_simulator.SimulateMouseRelease(shortcut.MouseButton), shortcut.MouseButton, "release");
+            ReleaseModifiers(shortcut);
+            return Task.CompletedTask;
+        }
         foreach (KeyCode key in shortcut.Modifiers.Append(shortcut.Key).Reverse())
             EnsureSuccess(_simulator.SimulateKeyRelease(key), key, "release");
         return Task.CompletedTask;
@@ -70,5 +94,20 @@ public sealed class WindowsTextInsertionService : ITextInsertionService, IKeyboa
     private static void EnsureSuccess(UioHookResult result, KeyCode key, string action)
     {
         if (result != UioHookResult.Success) throw new InvalidOperationException($"SharpHook could not {action} {key}: {result}.");
+    }
+
+    private static void EnsureSuccess(UioHookResult result, MouseButton button, string action)
+    {
+        if (result != UioHookResult.Success) throw new InvalidOperationException($"SharpHook could not {action} {button}: {result}.");
+    }
+
+    private void PressModifiers(ShortcutGesture shortcut)
+    {
+        foreach (KeyCode key in shortcut.Modifiers) EnsureSuccess(_simulator.SimulateKeyPress(key), key, "press");
+    }
+
+    private void ReleaseModifiers(ShortcutGesture shortcut)
+    {
+        foreach (KeyCode key in shortcut.Modifiers.Reverse()) _simulator.SimulateKeyRelease(key);
     }
 }

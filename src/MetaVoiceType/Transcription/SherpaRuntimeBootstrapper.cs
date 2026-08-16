@@ -28,7 +28,19 @@ public sealed partial class SherpaRuntimeBootstrapper
     }
 
     public bool ForceCpu => _options.ForceCpu || _userForceCpu;
-    public void SetUserForceCpu(bool value) { lock (_gate) _userForceCpu = value; }
+    public void SetUserForceCpu(bool value)
+    {
+        lock (_gate)
+        {
+            if (_userForceCpu == value) return;
+            _userForceCpu = value;
+            if (!value && !_options.ForceCpu && !CudaRuntimeSelected)
+            {
+                _configured = false;
+                _loadFailure = null;
+            }
+        }
+    }
     public bool CudaRuntimeSelected { get; private set; }
     public string? GpuName { get; private set; }
     public string? RuntimeFailure => _loadFailure;
@@ -42,13 +54,13 @@ public sealed partial class SherpaRuntimeBootstrapper
     {
         lock (_gate)
         {
-            if (_configured) return CudaRuntimeSelected;
-            _configured = true;
             if (ForceCpu)
             {
                 _loadFailure = _options.ForceCpu ? "CPU was forced by diagnostics." : "CPU-only mode is enabled in Settings.";
                 return false;
             }
+            if (_configured) return CudaRuntimeSelected;
+            _configured = true;
 
             GpuName = ProbeNvidiaGpu();
             if (GpuName is null)

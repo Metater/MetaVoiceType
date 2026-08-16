@@ -80,9 +80,32 @@ public sealed partial class MainWindow : Window
         switch (vm.ActiveShortcutCapture)
         {
             case MainViewModel.ShortcutCaptureTarget.CustomCommand: vm.CaptureCustomShortcut(gesture); break;
-            case MainViewModel.ShortcutCaptureTarget.RecordingStarted or MainViewModel.ShortcutCaptureTarget.RecordingStopped: vm.CaptureRecordingEventShortcut(gesture); break;
+            case MainViewModel.ShortcutCaptureTarget.RecordingStarted or MainViewModel.ShortcutCaptureTarget.RecordingStopped or MainViewModel.ShortcutCaptureTarget.RecordingHeld: vm.CaptureRecordingEventShortcut(gesture); break;
             case MainViewModel.ShortcutCaptureTarget.RecordingToggle: await vm.CaptureHotkeyAsync(gesture); break;
         }
+    }
+
+    private void WindowPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.Source is Button || DataContext is not ViewModels.MainViewModel vm || vm.ActiveShortcutCapture == MainViewModel.ShortcutCaptureTarget.None) return;
+        PointerPointProperties properties = e.GetCurrentPoint(this).Properties;
+        string? gesture = properties.IsXButton2Pressed ? "Mouse5" : properties.IsXButton1Pressed ? "Mouse4" :
+            properties.IsMiddleButtonPressed ? "Mouse3" : properties.IsRightButtonPressed ? "Mouse2" : properties.IsLeftButtonPressed ? "Mouse1" : null;
+        if (gesture is null) return;
+        e.Handled = true;
+        if (vm.ActiveShortcutCapture == MainViewModel.ShortcutCaptureTarget.CustomCommand) vm.CaptureCustomShortcut(gesture);
+        else if (vm.ActiveShortcutCapture == MainViewModel.ShortcutCaptureTarget.RecordingToggle) _ = vm.CaptureHotkeyAsync("Ctrl+" + gesture);
+        else vm.CaptureRecordingEventShortcut(gesture);
+    }
+
+    private void CustomCommandFieldLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel vm) vm.RequestCustomCommandAutoSave();
+    }
+
+    private void ReplacementFieldLostFocus(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is ViewModels.MainViewModel vm) vm.RequestReplacementAutoSave();
     }
 
     private static string FormatGesture(KeyEventArgs e)

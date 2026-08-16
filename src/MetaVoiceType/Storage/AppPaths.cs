@@ -6,10 +6,13 @@ public sealed class AppPaths
     {
         Root = root ?? Environment.GetEnvironmentVariable("METAVOICETYPE_DATA_ROOT")
             ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MetaVoiceType");
+        PreferencesRoot = root ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MetaVoiceType");
     }
 
     public string Root { get; }
-    public string SettingsFile => Path.Combine(Root, "settings.json");
+    public string PreferencesRoot { get; }
+    public string SettingsFile => Path.Combine(PreferencesRoot, "settings.json");
+    public string LegacySettingsFile => Path.Combine(Root, "settings.json");
     public string HistoryFile => Path.Combine(Root, "history.json");
     public string Models => Path.Combine(Root, "Models");
     public string DictationModels => Path.Combine(Models, "Parakeet");
@@ -20,7 +23,7 @@ public sealed class AppPaths
 
     public void EnsureCreated()
     {
-        foreach (string path in new[] { Root, Models, DictationModels, RuntimeModels, VoskModels, Recovery, Logs })
+        foreach (string path in new[] { Root, PreferencesRoot, Models, DictationModels, RuntimeModels, VoskModels, Recovery, Logs })
             Directory.CreateDirectory(path);
     }
 }

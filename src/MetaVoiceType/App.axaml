@@ -1,10 +1,12 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:material="using:Material.Icons.Avalonia"
+             xmlns:converters="using:MetaVoiceType.UI.Converters"
              x:Class="MetaVoiceType.App"
              RequestedThemeVariant="Default">
   <Application.Resources>
     <ResourceDictionary>
+      <converters:StatusBrushConverter x:Key="StatusBrushConverter"/>
       <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Dark">
           <Color x:Key="CanvasColor">#0C0E14</Color><Color x:Key="SurfaceColor">#141720</Color><Color x:Key="SurfaceRaisedColor">#1A1E29</Color><Color x:Key="SurfaceHoverColor">#222735</Color><Color x:Key="BorderColor">#2A3040</Color>
@@ -35,6 +37,7 @@
     <Style Selector="TextBlock"><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
     <Style Selector="material|MaterialIcon"><Setter Property="Height" Value="18"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/></Style>
     <Style Selector="TextBlock.muted"><Setter Property="Foreground" Value="{DynamicResource MutedTextBrush}"/></Style><Style Selector="TextBlock.subtle"><Setter Property="Foreground" Value="{DynamicResource SubtleTextBrush}"/></Style>
+    <Style Selector="TextBlock.status"><Setter Property="Foreground" Value="{Binding Text, RelativeSource={RelativeSource Self}, Converter={StaticResource StatusBrushConverter}}"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
     <Style Selector="TextBlock.heading"><Setter Property="FontSize" Value="25"/><Setter Property="FontWeight" Value="SemiBold"/></Style><Style Selector="TextBlock.section"><Setter Property="FontSize" Value="18"/><Setter Property="FontWeight" Value="SemiBold"/></Style>
     <Style Selector="Border.card"><Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/><Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="CornerRadius" Value="16"/><Setter Property="Padding" Value="20"/></Style>
     <Style Selector="Border.soft"><Setter Property="Background" Value="{DynamicResource SurfaceRaisedBrush}"/><Setter Property="CornerRadius" Value="11"/><Setter Property="Padding" Value="13"/></Style>

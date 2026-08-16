@@ -185,6 +185,32 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         });
     }
 
+    public void UnloadVoiceCommands()
+    {
+        _commands.Unload();
+        lock (_gate) { _activeVoiceLanguageId = null; _activeVoiceLanguage = null; }
+        MarkVoiceCommandsUnavailable();
+    }
+
+    public void UnloadDictation()
+    {
+        lock (_gate)
+        {
+            if (_active is not null) throw new InvalidOperationException("Stop recording before deleting a dictation model.");
+            IAsrBackend? previous = _backend;
+            _backend = null;
+            _vadModelPath = null;
+            if (previous is not null) RetireBackend(previous);
+        }
+        MarkDictationUnavailable();
+        Dispatcher.UIThread.Post(() =>
+        {
+            _state.DictationModelState = "Not installed";
+            _state.Acceleration = "Not installed";
+            _state.EngineLabel = "Dictation unavailable";
+        });
+    }
+
     public void MarkDictationUnavailable() { Readiness.SetDictationReady(false); RefreshReadinessStatus(); }
     public void CompleteStartupReadiness() { Readiness.CompleteInitialization(); RefreshReadinessStatus(); }
 
@@ -527,7 +553,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         string segmentText = session.SegmentText;
         string? fallback;
         lock (_gate) fallback = _textFallbackPhrases.Remove(session.Id, out string? phrase) ? phrase : null;
-        if (session.ControlSpans.Count == 0) segmentText = TranscriptTailCleaner.RemoveAcceptedCommandTail(segmentText, fallback);
+        if (session.ControlSpans.Count == 0) segmentText = TranscriptTailCleaner.RemoveAcceptedCommandBoundary(segmentText, fallback);
         segmentText = WordReplacementEngine.Apply(segmentText, _settings.WordReplacementGroups);
         string text = string.Join(' ', new[] { session.PreviousText, segmentText }
             .Where(x => !string.IsNullOrWhiteSpace(x))).Trim();

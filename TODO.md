@@ -16,3 +16,10 @@
 - [x] Add custom-command playback key events, including single keys such as Enter.
 - [x] Fix recording finalization cutoff by draining capture frames queued before stop into the session before VAD flush.
 - [x] Switch the release pipeline to Velopack Zstandard differential updates, with a full-package fallback.
+- [x] Clean out the voice commands from what you say by partial match at the beginning and end.
+- [x] Add a checkbox/toggle to make Ctrl+Space perform paste on complete.
+- [x] Add support for high function keys (e.g., F24) in record hotkey configuration in settings, and support every key press and mouse button type cleanly.
+- [x] Auto-save settings and remove redundant save buttons.
+- [x] Keep user preferences outside the install-owned local application directory so they survive uninstall/reinstall.
+- [x] Add per-page resets, a global settings reset, and per-model deletion controls.
+- [x] Correct CPU-only mode transitions and use consistent success/warning/error status colors.

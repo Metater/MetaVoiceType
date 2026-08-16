@@ -4,8 +4,9 @@ namespace MetaVoiceType.Core.Models;
 
 public sealed record KeyboardStroke(KeyCode Key, bool IsKeyDown);
 
-public sealed record ShortcutGesture(bool Control, bool Shift, bool Alt, bool Windows, KeyCode Key)
+public sealed record ShortcutGesture(bool Control, bool Shift, bool Alt, bool Windows, KeyCode Key, MouseButton MouseButton = SharpHook.Data.MouseButton.NoButton)
 {
+    public bool IsMouse => MouseButton != SharpHook.Data.MouseButton.NoButton;
     public IReadOnlyList<KeyCode> Modifiers
     {
         get
@@ -19,12 +20,14 @@ public sealed record ShortcutGesture(bool Control, bool Shift, bool Alt, bool Wi
         }
     }
 
-    public override string ToString() => string.Join('+', Modifiers.Select(ShortcutGestureParser.Display).Append(ShortcutGestureParser.Display(Key)));
+    public override string ToString() => string.Join('+', Modifiers.Select(ShortcutGestureParser.Display)
+        .Append(IsMouse ? ShortcutGestureParser.Display(MouseButton) : ShortcutGestureParser.Display(Key)));
 
     public IReadOnlyList<KeyboardStroke> PlaybackSequence()
     {
         var strokes = new List<KeyboardStroke>(Modifiers.Count * 2 + 2);
         strokes.AddRange(Modifiers.Select(x => new KeyboardStroke(x, true)));
+        if (IsMouse) throw new InvalidOperationException("Mouse gestures use mouse event simulation, not keyboard strokes.");
         strokes.Add(new(Key, true));
         strokes.Add(new(Key, false));
         strokes.AddRange(Modifiers.Reverse().Select(x => new KeyboardStroke(x, false)));
@@ -57,6 +60,14 @@ public static class ShortcutGestureParser
         ["Pause"] = KeyCode.VcPause,
         ["PrintScreen"] = KeyCode.VcPrintScreen
     };
+    private static readonly Dictionary<string, MouseButton> MouseAliases = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Mouse1"] = MouseButton.Button1, ["LeftMouse"] = MouseButton.Button1, ["LeftClick"] = MouseButton.Button1,
+        ["Mouse2"] = MouseButton.Button2, ["RightMouse"] = MouseButton.Button2, ["RightClick"] = MouseButton.Button2,
+        ["Mouse3"] = MouseButton.Button3, ["MiddleMouse"] = MouseButton.Button3, ["MiddleClick"] = MouseButton.Button3,
+        ["Mouse4"] = MouseButton.Button4, ["XButton1"] = MouseButton.Button4,
+        ["Mouse5"] = MouseButton.Button5, ["XButton2"] = MouseButton.Button5
+    };
 
     public static ShortcutGesture Parse(string value) => ParseCore(value, requireModifier: true);
 
@@ -67,6 +78,7 @@ public static class ShortcutGestureParser
         if (string.IsNullOrWhiteSpace(value)) throw new FormatException("Press a key or shortcut.");
         bool control = false, shift = false, alt = false, windows = false;
         KeyCode? key = null;
+        MouseButton mouse = MouseButton.NoButton;
         foreach (string raw in value.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
         {
             switch (raw.ToUpperInvariant())
@@ -76,12 +88,13 @@ public static class ShortcutGestureParser
                 case "ALT": alt = true; continue;
                 case "WIN": case "WINDOWS": case "META": windows = true; continue;
             }
-            if (key is not null) throw new FormatException("A shortcut can contain only one non-modifier key.");
-            key = ParseKey(raw);
+            if (key is not null || mouse != MouseButton.NoButton) throw new FormatException("A shortcut can contain only one key or mouse button.");
+            if (MouseAliases.TryGetValue(raw, out MouseButton parsedMouse)) mouse = parsedMouse;
+            else key = ParseKey(raw);
         }
-        if (key is null) throw new FormatException("Modifier-only shortcuts are not valid.");
+        if (key is null && mouse == MouseButton.NoButton) throw new FormatException("Modifier-only shortcuts are not valid.");
         if (requireModifier && !control && !shift && !alt && !windows) throw new FormatException("Use at least one modifier for a global shortcut.");
-        return new(control, shift, alt, windows, key.Value);
+        return new(control, shift, alt, windows, key ?? KeyCode.VcUndefined, mouse);
     }
 
     private static KeyCode ParseKey(string value)
@@ -104,4 +117,14 @@ public static class ShortcutGestureParser
         string value = key.ToString();
         return value.StartsWith("Vc", StringComparison.Ordinal) ? value[2..] : value;
     }
+
+    public static string Display(MouseButton button) => button switch
+    {
+        MouseButton.Button1 => "Mouse1",
+        MouseButton.Button2 => "Mouse2",
+        MouseButton.Button3 => "Mouse3",
+        MouseButton.Button4 => "Mouse4",
+        MouseButton.Button5 => "Mouse5",
+        _ => throw new ArgumentOutOfRangeException(nameof(button))
+    };
 }

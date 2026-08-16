@@ -33,7 +33,7 @@ public sealed class V13PolishTests : IDisposable
 
         AppSettings migrated = JsonSettingsStore.Migrate(legacy);
 
-        Assert.Equal(6, migrated.SchemaVersion);
+        Assert.Equal(7, migrated.SchemaVersion);
         Assert.Equal(["put it here"], migrated.CommandAliases["en-us"]["pasteRecording"]);
         Assert.Equal(["open notes"], Assert.Single(migrated.CustomCommands).Aliases);
         Assert.Equal(2, migrated.WordReplacementGroups.Count);

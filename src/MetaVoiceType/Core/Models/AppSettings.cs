@@ -40,7 +40,7 @@ public sealed class CustomVoiceCommand
 
 public sealed record AppSettings
 {
-    public int SchemaVersion { get; init; } = 6;
+    public int SchemaVersion { get; init; } = 7;
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool OnboardingComplete { get; init; }
     public bool SetupCompletedOnce { get; init; }
@@ -51,6 +51,7 @@ public sealed record AppSettings
     public DictationMode DictationMode { get; init; } = DictationMode.Automatic;
     public string? AudioDeviceId { get; init; }
     public bool CopyOnStop { get; init; } = true;
+    public bool PasteOnShortcutStop { get; init; }
     public bool ShowFloatingPill { get; init; } = true;
     public bool ForceCpuOnly { get; init; }
     public double CueVolume { get; init; } = 0.6;

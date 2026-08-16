@@ -8,7 +8,7 @@ namespace MetaVoiceType.Platform.Windows;
 public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
 {
     private readonly object _gate = new();
-    private readonly EventLoopGlobalHook _hook = new(GlobalHookType.Keyboard);
+    private readonly EventLoopGlobalHook _hook = new(GlobalHookType.All);
     private readonly HashSet<KeyCode> _pressed = [];
     private ShortcutGesture _gesture = ShortcutGestureParser.Parse("Ctrl+Space");
     private Task? _run;
@@ -25,6 +25,8 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
             if (_run is not null) return Task.CompletedTask;
             _hook.KeyPressed += OnPressed;
             _hook.KeyReleased += OnReleased;
+            _hook.MousePressed += OnMousePressed;
+            _hook.MouseReleased += OnMouseReleased;
             _run = _hook.RunAsync();
         }
         return Task.CompletedTask;
@@ -51,6 +53,8 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
             if (run is null) return;
             _hook.KeyPressed -= OnPressed;
             _hook.KeyReleased -= OnReleased;
+            _hook.MousePressed -= OnMousePressed;
+            _hook.MouseReleased -= OnMouseReleased;
             if (_hook.IsRunning) _hook.Stop();
             _run = null;
             _pressed.Clear();
@@ -67,13 +71,33 @@ public sealed class WindowsGlobalHotkeyService : IGlobalHotkeyService
         lock (_gate)
         {
             _pressed.Add(args.Data.KeyCode);
-            if (args.Data.KeyCode == _gesture.Key && !_triggerHeld && ModifiersMatch(_gesture))
+            if (!_gesture.IsMouse && args.Data.KeyCode == _gesture.Key && !_triggerHeld && ModifiersMatch(_gesture))
             {
                 _triggerHeld = true;
                 fire = true;
             }
         }
         if (fire) ToggleRecording?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnMousePressed(object? sender, MouseHookEventArgs args)
+    {
+        if (args.IsEventSimulated) return;
+        bool fire = false;
+        lock (_gate)
+        {
+            if (_gesture.IsMouse && args.Data.Button == _gesture.MouseButton && !_triggerHeld && ModifiersMatch(_gesture))
+            {
+                _triggerHeld = true;
+                fire = true;
+            }
+        }
+        if (fire) ToggleRecording?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnMouseReleased(object? sender, MouseHookEventArgs args)
+    {
+        lock (_gate) if (_gesture.IsMouse && args.Data.Button == _gesture.MouseButton) _triggerHeld = false;
     }
 
     private void OnReleased(object? sender, KeyboardHookEventArgs args)

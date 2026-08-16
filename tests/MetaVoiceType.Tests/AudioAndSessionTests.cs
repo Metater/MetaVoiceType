@@ -63,10 +63,12 @@ public sealed class AudioAndSessionTests
     }
 
     [Fact]
-    public void AcceptedControlPhraseRemovedOnlyFromTail()
+    public void AcceptedControlPhraseRemovedFromTranscriptBoundaries()
     {
         Assert.Equal("we discussed stop recording yesterday", TranscriptTailCleaner.RemoveAcceptedCommandTail("we discussed stop recording yesterday. stop recording", "stop recording"));
-        Assert.Equal("stop recording is a phrase", TranscriptTailCleaner.RemoveAcceptedCommandTail("stop recording is a phrase", "stop recording"));
+        Assert.Equal("is a phrase", TranscriptTailCleaner.RemoveAcceptedCommandBoundary("stop recording is a phrase", "stop recording"));
+        Assert.Equal("ordinary words in the middle stay", TranscriptTailCleaner.RemoveAcceptedCommandBoundary("ordinary words in the middle stay", "stop recording"));
+        Assert.Equal("the useful text", TranscriptTailCleaner.RemoveAcceptedCommandBoundary("stop the useful text", "stop recording"));
     }
 
     private sealed class FakeAsrBackend(string result) : IAsrBackend

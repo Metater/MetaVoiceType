@@ -15,6 +15,11 @@ public sealed partial class JsonSettingsStore(AppPaths paths, ILogger<JsonSettin
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (!File.Exists(paths.SettingsFile) && !string.Equals(paths.SettingsFile, paths.LegacySettingsFile, StringComparison.OrdinalIgnoreCase) && File.Exists(paths.LegacySettingsFile))
+            {
+                Directory.CreateDirectory(paths.PreferencesRoot);
+                File.Copy(paths.LegacySettingsFile, paths.SettingsFile, overwrite: false);
+            }
             if (!File.Exists(paths.SettingsFile))
                 return new AppSettings();
             AppSettings loaded;
@@ -82,7 +87,7 @@ public sealed partial class JsonSettingsStore(AppPaths paths, ILogger<JsonSettin
 
         return settings with
         {
-            SchemaVersion = 6,
+            SchemaVersion = 7,
             OnboardingComplete = false,
             SetupCompletedOnce = settings.SetupCompletedOnce || settings.OnboardingComplete,
             CommandOverrides = new(StringComparer.OrdinalIgnoreCase),

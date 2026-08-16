@@ -2,9 +2,15 @@
 
 MetaVoiceType is a local-first Windows dictation app. Vosk listens locally for configurable voice commands; NVIDIA Parakeet transcribes only during recording. Command language and dictation language are independent.
 
+[Set Up Discord Push-to-Mute for MetaVoiceType Using AutoHotkey](docs/Set Up Discord Push-to-Mute for MetaVoiceType Using AutoHotkey.md): Step-by-step guide to configure a reliable push-to-mute workflow while recording.
+
 ## Windows V1.4
 
 - Windows 10/11 x64, .NET 10, and Avalonia
+- Settings save automatically. Recording-event fields accept typed keys and mouse buttons such as `F24`, `Mouse4`, or `Ctrl+Mouse5`.
+- Optional paste-on-shortcut-stop turns the recording shortcut into a one-key record-and-paste workflow.
+- Each settings page can be reset independently; Version &amp; updates contains a global settings reset, and installed models can be deleted individually.
+- User preferences are stored separately from the installation so they survive uninstall/reinstall unless explicitly reset.
 - Self-contained installer; no separate .NET or CUDA Toolkit setup
 - Automatic multilingual dictation with Parakeet TDT 0.6B v3, or English with v2
 - NVIDIA CUDA preferred through the verified Sherpa runtime; automatic CPU fallback

@@ -65,6 +65,19 @@ public sealed partial class VoskCommandRecognizer(ILogger<VoskCommandRecognizer>
         }
     }
 
+    public void Unload()
+    {
+        lock (_gate)
+        {
+            _recognizer?.Dispose();
+            _model?.Dispose();
+            _recognizer = null;
+            _model = null;
+            _definitions = [];
+            _lastAccepted.Clear();
+        }
+    }
+
     private static VoskRecognizer Create(Model model, IReadOnlyList<VoiceCommandDefinition> definitions, bool restricted)
     {
         string grammar = BuildGrammar(definitions);
@@ -106,7 +119,7 @@ public sealed partial class VoskCommandRecognizer(ILogger<VoskCommandRecognizer>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-        lock (_gate) { _recognizer?.Dispose(); _model?.Dispose(); _recognizer = null; _model = null; }
+        Unload();
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Vosk model {Model} loaded (restricted grammar={Restricted}).")]

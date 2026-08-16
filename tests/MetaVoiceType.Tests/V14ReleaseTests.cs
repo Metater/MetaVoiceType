@@ -52,16 +52,33 @@ public sealed class V14ReleaseTests
     }
 
     [Fact]
-    public void SchemaSixPreservesHeldRecordingShortcut()
+    public void SchemaSevenPreservesHeldRecordingShortcutAndPastePreference()
     {
         AppSettings migrated = JsonSettingsStore.Migrate(new AppSettings
         {
             SchemaVersion = 5,
-            RecordingHeldShortcut = "Ctrl+Shift+M"
+            RecordingHeldShortcut = "Ctrl+Shift+M",
+            PasteOnShortcutStop = true
         });
 
-        Assert.Equal(6, migrated.SchemaVersion);
+        Assert.Equal(7, migrated.SchemaVersion);
         Assert.Equal("Ctrl+Shift+M", migrated.RecordingHeldShortcut);
+        Assert.True(migrated.PasteOnShortcutStop);
+    }
+
+    [Theory]
+    [InlineData("F24", "F24")]
+    [InlineData("Mouse4", "Mouse4")]
+    [InlineData("Ctrl+Mouse5", "Ctrl+Mouse5")]
+    public void TypedHighFunctionAndMouseShortcutsRoundTrip(string input, string expected) =>
+        Assert.Equal(expected, ShortcutGestureParser.ParseAction(input).ToString());
+
+    [Fact]
+    public void InstalledBuildKeepsPreferencesOutsideTheLocalInstallDataRoot()
+    {
+        var paths = new AppPaths();
+        Assert.NotEqual(Path.GetDirectoryName(paths.SettingsFile), paths.Root);
+        Assert.StartsWith(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), paths.SettingsFile, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -79,7 +96,10 @@ public sealed class V14ReleaseTests
         Assert.Contains("vpk @downloadArguments", packaging);
         Assert.Contains("--delta BestSize", packaging);
         Assert.Contains("Where-Object Name -ne $currentFullPackage", packaging);
-        Assert.Contains("<Version>1.4.0</Version>", props);
+        Assert.Contains("<Version>1.4.1</Version>", props);
+        Assert.DoesNotContain("Save general settings", window);
+        Assert.Contains("Reset all user settings", window);
+        Assert.Contains("DeleteModelCommand", window);
     }
 
     private static string FindRoot()
