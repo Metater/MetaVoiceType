@@ -40,7 +40,7 @@ public sealed class CustomVoiceCommand
 
 public sealed record AppSettings
 {
-    public int SchemaVersion { get; init; } = 5;
+    public int SchemaVersion { get; init; } = 6;
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool OnboardingComplete { get; init; }
     public bool SetupCompletedOnce { get; init; }
@@ -57,6 +57,7 @@ public sealed record AppSettings
     public string ToggleHotkey { get; init; } = "Ctrl+Space";
     public string? RecordingStartedShortcut { get; init; }
     public string? RecordingStoppedShortcut { get; init; }
+    public string? RecordingHeldShortcut { get; init; }
     public bool CloseToTrayNoticeShown { get; init; }
     public Dictionary<string, Dictionary<string, string>> CommandOverrides { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, Dictionary<string, List<string>>> CommandAliases { get; init; } = new(StringComparer.OrdinalIgnoreCase);

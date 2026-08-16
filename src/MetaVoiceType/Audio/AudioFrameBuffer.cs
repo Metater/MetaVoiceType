@@ -9,6 +9,7 @@ public sealed class AudioFrameBuffer
     private long _captured;
     private long _dispatched;
     private long _dropped;
+    private long _samplesQueued;
     private int _depth;
     private int _highWater;
 
@@ -30,6 +31,7 @@ public sealed class AudioFrameBuffer
     {
         Interlocked.Increment(ref _captured);
         if (!_channel.Writer.TryWrite(frame)) { Interlocked.Increment(ref _dropped); return false; }
+        Interlocked.Add(ref _samplesQueued, frame.LongLength / sizeof(short));
         int depth = Interlocked.Increment(ref _depth);
         int maximum = Volatile.Read(ref _highWater);
         while (depth > maximum)
@@ -52,6 +54,7 @@ public sealed class AudioFrameBuffer
     }
 
     public AudioMetrics Snapshot(double callbackMilliseconds) => new(Interlocked.Read(ref _captured), Depth,
-        Volatile.Read(ref _highWater), Interlocked.Read(ref _dropped), callbackMilliseconds, Interlocked.Read(ref _dispatched));
+        Volatile.Read(ref _highWater), Interlocked.Read(ref _dropped), callbackMilliseconds, Interlocked.Read(ref _dispatched),
+        Interlocked.Read(ref _samplesQueued));
     public void Complete() => _channel.Writer.TryComplete();
 }

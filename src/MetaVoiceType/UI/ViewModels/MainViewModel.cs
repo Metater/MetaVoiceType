@@ -16,9 +16,11 @@ using MetaVoiceType.VoiceCommands;
 
 namespace MetaVoiceType.UI.ViewModels;
 
+public sealed record CreditItem(string Name, string Description, string Url);
+
 public partial class MainViewModel : ObservableObject, IDisposable
 {
-    public enum ShortcutCaptureTarget { None, RecordingToggle, CustomCommand, RecordingStarted, RecordingStopped }
+    public enum ShortcutCaptureTarget { None, RecordingToggle, CustomCommand, RecordingStarted, RecordingStopped, RecordingHeld }
     private static readonly string[] ExposedLanguageIds = ["en-us", "ru", "fr", "de", "es", "pt-br", "it", "nl", "uk", "sv", "cs", "pl"];
     private readonly ApplicationOrchestrator _orchestrator;
     private readonly IModelDownloadService _downloads;
@@ -104,6 +106,26 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public IReadOnlyList<AppTheme> Themes { get; } = [AppTheme.System, AppTheme.Dark, AppTheme.Light];
     public IReadOnlyList<CustomCommandType> CustomCommandTypes { get; } = Enum.GetValues<CustomCommandType>();
     public IReadOnlyList<CommandWindowMode> WindowModes { get; } = Enum.GetValues<CommandWindowMode>();
+    public IReadOnlyList<CreditItem> Credits { get; } =
+    [
+        new("Avalonia", "A cross-platform UI framework for .NET.", "https://github.com/AvaloniaUI/Avalonia"),
+        new("Material.Icons.Avalonia", "Material Design Icons controls for Avalonia applications.", "https://github.com/SKProCH/Material.Icons"),
+        new("CommunityToolkit.Mvvm", "A modern, fast, and modular MVVM library.", "https://github.com/CommunityToolkit/dotnet"),
+        new("Microsoft.Extensions", "Hosting, dependency injection, configuration, and logging libraries for .NET.", "https://github.com/dotnet/runtime"),
+        new("System.CommandLine", "Command-line parser, invocation, and rendering support for .NET.", "https://github.com/dotnet/command-line-api"),
+        new("NAudio", "Audio and MIDI functionality for .NET.", "https://github.com/naudio/NAudio"),
+        new("FftSharp", "A .NET library for Fourier transform and audio spectrum analysis.", "https://github.com/swharden/FftSharp"),
+        new("Vosk", "Offline speech recognition API for many languages and platforms.", "https://github.com/alphacep/vosk-api"),
+        new("sherpa-onnx", "Offline speech recognition and audio intelligence with ONNX Runtime.", "https://github.com/k2-fsa/sherpa-onnx"),
+        new("SharpHook", "A cross-platform global keyboard and mouse hook for .NET.", "https://github.com/TolikPylypchuk/SharpHook"),
+        new("TextCopy", "A cross-platform clipboard library for .NET.", "https://github.com/CopyText/TextCopy"),
+        new("Serilog", "Structured diagnostic logging for .NET applications.", "https://github.com/serilog/serilog"),
+        new("Serilog.Extensions.Hosting", "Serilog integration for Microsoft.Extensions.Hosting.", "https://github.com/serilog/serilog-extensions-hosting"),
+        new("Serilog.Sinks.File", "A Serilog sink that writes log events to text files.", "https://github.com/serilog/serilog-sinks-file"),
+        new("SharpCompress", "Archive and compression support for .NET.", "https://github.com/adamhathcock/sharpcompress"),
+        new("Velopack", "Installer and automatic update framework for desktop applications.", "https://github.com/velopack/velopack"),
+        new("Inter", "A typeface family carefully crafted for computer screens.", "https://github.com/rsms/inter")
+    ];
 
     [ObservableProperty] public partial bool ShowOnboarding { get; set; } = true;
     [ObservableProperty] public partial bool ShowSettings { get; set; }
@@ -141,6 +163,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial ShortcutCaptureTarget ActiveShortcutCapture { get; set; }
     [ObservableProperty] public partial string RecordingStartedShortcut { get; set; } = "";
     [ObservableProperty] public partial string RecordingStoppedShortcut { get; set; } = "";
+    [ObservableProperty] public partial string RecordingHeldShortcut { get; set; } = "";
     [ObservableProperty] public partial CustomVoiceCommand? SelectedCustomCommand { get; set; }
     [ObservableProperty] public partial CustomCommandType SelectedCustomCommandType { get; set; }
     [ObservableProperty] public partial TranscriptRecord? PendingDeleteRecord { get; set; }
@@ -151,6 +174,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public bool IsCapturingCustomShortcut => ActiveShortcutCapture == ShortcutCaptureTarget.CustomCommand;
     public bool IsCapturingRecordingStartedShortcut => ActiveShortcutCapture == ShortcutCaptureTarget.RecordingStarted;
     public bool IsCapturingRecordingStoppedShortcut => ActiveShortcutCapture == ShortcutCaptureTarget.RecordingStopped;
+    public bool IsCapturingRecordingHeldShortcut => ActiveShortcutCapture == ShortcutCaptureTarget.RecordingHeld;
     public bool HasSelectedCustomCommand => SelectedCustomCommand is not null;
     public bool ShowProgramFields => HasSelectedCustomCommand && SelectedCustomCommandType == CustomCommandType.Program;
     public bool ShowScriptFields => HasSelectedCustomCommand && SelectedCustomCommandType is CustomCommandType.PowerShell or CustomCommandType.CommandPrompt;
@@ -183,7 +207,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
     public string AnimatedStatusText => Animate(State.StatusMessage);
-    public string AppVersion => "Version " + (GetType().Assembly.GetName().Version?.ToString(3) ?? "1.3.1");
+    public string AppVersion => GetType().Assembly.GetName().Version?.ToString(3) ?? "1.4.0";
+    public string RecordingCommandExamples => string.Join('\n', BuiltInAliasEditors.Select(editor =>
+        $"{editor.Label}: {string.Join(" / ", editor.Aliases.Values.Take(3).Select(value => $"“{value}”"))}"));
     public string PillStatusText => State.IsRecording ? Animate("Recording") : State.PasteState switch
     {
         PasteRequestState.Queued => Animate("Preparing"),
@@ -203,8 +229,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
     public string ElapsedText => State.RecordingStartedAt is DateTimeOffset started ? FormatElapsed(DateTimeOffset.UtcNow - started) : "00:00";
     public bool CanCopyCurrent => !string.IsNullOrWhiteSpace(State.LiveTranscript) || State.History.Count > 0;
     public bool HasHistory => State.History.Count > 0;
-    public string VoiceLanguageStatus => SelectedVoiceLanguage.Id == State.ActiveVoiceLanguageId ? $"{SelectedVoiceLanguage.DisplayName} · Active"
-        : State.VoiceModelState == "Downloading" ? $"{SelectedVoiceLanguage.DisplayName} · Downloading {DownloadPercent:F0}%" : $"{SelectedVoiceLanguage.DisplayName} · Not active";
+    public string VoiceLanguageStatus => SelectedVoiceLanguage.Id == State.ActiveVoiceLanguageId ? $"{SelectedVoiceLanguage.DisplayName} — Active"
+        : State.VoiceModelState == "Downloading" ? $"{SelectedVoiceLanguage.DisplayName} — Downloading {DownloadPercent:F0}%" : $"{SelectedVoiceLanguage.DisplayName} — Not active";
     public string CurrentListenerStatus => State.ActiveVoiceLanguageId is null ? "Voice command language: Not active" : $"Voice command language: {Languages.FirstOrDefault(x => x.Id == State.ActiveVoiceLanguageId)?.DisplayName ?? State.ActiveVoiceLanguageId}";
     public string DiagnosticsSummary => $"ASR: {State.EngineLabel}\nProvider: {State.Acceleration}\nVosk: {State.ActiveVoiceLanguageId ?? "not active"}\nMicrophone: {SelectedAudioDevice?.Name ?? "unavailable"}";
     public string VoiceModelActionText => _orchestrator.Readiness.SetupCompletedOnce && !_orchestrator.Readiness.VoiceCommandsReady
@@ -225,6 +251,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         Theme = settings.Theme; CueVolume = settings.CueVolume; HotkeyGesture = settings.ToggleHotkey;
         RecordingStartedShortcut = settings.RecordingStartedShortcut ?? "";
         RecordingStoppedShortcut = settings.RecordingStoppedShortcut ?? "";
+        RecordingHeldShortcut = settings.RecordingHeldShortcut ?? "";
         foreach (CustomVoiceCommand command in settings.CustomCommands) CustomCommands.Add(command);
         foreach (WordReplacementGroup group in settings.WordReplacementGroups) ReplacementGroups.Add(new(group));
         ApplyTheme(Theme);
@@ -246,6 +273,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 "settings-replacements" => 3,
                 "settings-audio" => 4,
                 "settings-about" => 5,
+                "settings-credits" => 6,
                 _ => 0
             };
             if (SettingsTabIndex == 2 && CustomCommands.Count > 0) SelectedCustomCommand = CustomCommands[0];
@@ -289,7 +317,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     partial void OnActiveShortcutCaptureChanged(ShortcutCaptureTarget value)
     {
         OnPropertyChanged(nameof(IsCapturingHotkey)); OnPropertyChanged(nameof(IsCapturingCustomShortcut));
-        OnPropertyChanged(nameof(IsCapturingRecordingStartedShortcut)); OnPropertyChanged(nameof(IsCapturingRecordingStoppedShortcut));
+        OnPropertyChanged(nameof(IsCapturingRecordingStartedShortcut)); OnPropertyChanged(nameof(IsCapturingRecordingStoppedShortcut)); OnPropertyChanged(nameof(IsCapturingRecordingHeldShortcut));
     }
     partial void OnThemeChanged(AppTheme value) { if (!_loading) ApplyTheme(value); }
     partial void OnDownloadPercentChanged(double value) => OnPropertyChanged(nameof(VoiceLanguageStatus));
@@ -312,6 +340,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         StartRecordingPhrase = values[VoiceCommand.StartRecording]; ContinueRecordingPhrase = values[VoiceCommand.ContinueRecording]; StopRecordingPhrase = values[VoiceCommand.StopRecording]; PasteHerePhrase = values[VoiceCommand.PasteRecording];
         CancelRecordingPhrase = values[VoiceCommand.CancelRecording]; CancelPastePhrase = values[VoiceCommand.CancelPaste]; CopyPhrase = values[VoiceCommand.CopyRecordingToClipboard];
         _loading = false;
+        OnPropertyChanged(nameof(RecordingCommandExamples));
     }
 
     private Dictionary<VoiceCommand, IReadOnlyList<string>> CurrentAliases() => BuiltInAliasEditors
@@ -460,6 +489,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         {
             if (!string.IsNullOrWhiteSpace(RecordingStartedShortcut)) _ = ShortcutGestureParser.ParseAction(RecordingStartedShortcut);
             if (!string.IsNullOrWhiteSpace(RecordingStoppedShortcut)) _ = ShortcutGestureParser.ParseAction(RecordingStoppedShortcut);
+            if (!string.IsNullOrWhiteSpace(RecordingHeldShortcut)) _ = ShortcutGestureParser.ParseAction(RecordingHeldShortcut);
             HotkeyChangeResult hotkey = await _hotkey.ChangeAsync(HotkeyGesture);
             if (!hotkey.Success) { HotkeyValidation = hotkey.Error ?? "Shortcut could not be activated."; HotkeyGesture = hotkey.ActiveGesture; return false; }
             HotkeyGesture = hotkey.ActiveGesture; HotkeyValidation = "";
@@ -478,6 +508,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 ToggleHotkey = HotkeyGesture,
                 RecordingStartedShortcut = EmptyToNull(RecordingStartedShortcut),
                 RecordingStoppedShortcut = EmptyToNull(RecordingStoppedShortcut),
+                RecordingHeldShortcut = EmptyToNull(RecordingHeldShortcut),
                 WordReplacementGroups = ReplacementGroups.Select(x => x.ToModel()).ToList()
             };
             await _orchestrator.UpdateSettingsAsync(settings);
@@ -556,8 +587,10 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand] private void BeginCustomShortcutCapture() { if (SelectedCustomCommand is not null) { ActiveShortcutCapture = ShortcutCaptureTarget.CustomCommand; CustomCommandValidation = "Press a shortcut…"; } }
     [RelayCommand] private void BeginRecordingStartedShortcutCapture() { ActiveShortcutCapture = ShortcutCaptureTarget.RecordingStarted; HotkeyValidation = "Press a shortcut…"; }
     [RelayCommand] private void BeginRecordingStoppedShortcutCapture() { ActiveShortcutCapture = ShortcutCaptureTarget.RecordingStopped; HotkeyValidation = "Press a shortcut…"; }
+    [RelayCommand] private void BeginRecordingHeldShortcutCapture() { ActiveShortcutCapture = ShortcutCaptureTarget.RecordingHeld; HotkeyValidation = "Press a key or shortcut to hold…"; }
     [RelayCommand] private void ClearRecordingStartedShortcut() => RecordingStartedShortcut = "";
     [RelayCommand] private void ClearRecordingStoppedShortcut() => RecordingStoppedShortcut = "";
+    [RelayCommand] private void ClearRecordingHeldShortcut() => RecordingHeldShortcut = "";
     [RelayCommand] private async Task ResetHotkeyAsync() { HotkeyGesture = "Ctrl+Space"; HotkeyChangeResult result = await _hotkey.ChangeAsync(HotkeyGesture); HotkeyValidation = result.Error ?? ""; }
 
     public async Task CaptureHotkeyAsync(string gesture)
@@ -589,6 +622,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             string value = ShortcutGestureParser.ParseAction(gesture).ToString();
             if (IsCapturingRecordingStartedShortcut) RecordingStartedShortcut = value;
             if (IsCapturingRecordingStoppedShortcut) RecordingStoppedShortcut = value;
+            if (IsCapturingRecordingHeldShortcut) RecordingHeldShortcut = value;
             HotkeyValidation = "Shortcut captured. Save to apply.";
         }
         catch (FormatException ex) { HotkeyValidation = ex.Message; }
@@ -670,7 +704,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 await Task.Delay(450, token);
                 await _orchestrator.UpdateCommandAliasesAsync(SelectedVoiceLanguage.Id, CurrentAliases(), token);
-                Dispatcher.UIThread.Post(() => { CommandValidation = "Saved"; OnPropertyChanged(nameof(MainCommandText)); });
+                Dispatcher.UIThread.Post(() => { CommandValidation = "Saved"; OnPropertyChanged(nameof(MainCommandText)); OnPropertyChanged(nameof(RecordingCommandExamples)); });
             }
             catch (OperationCanceledException) { }
             catch (Exception ex) { Dispatcher.UIThread.Post(() => CommandValidation = ex.Message); }

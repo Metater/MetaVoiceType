@@ -22,7 +22,7 @@ public sealed record StartupOptions(bool SelfTest, bool ListAudioDevices, bool D
         var stressMinutes = new Option<int>("--stress-minutes") { Description = "Stream the default microphone through both recognizers for the specified duration." };
         var pasteText = new Option<string?>("--paste-text") { Description = "Paste exact diagnostic text into the focused application, then exit." };
         var recoveryCrashSeconds = new Option<int>("--recovery-crash-seconds") { Description = "Capture recovery audio for N seconds, then terminate abruptly for recovery testing." };
-        var uiView = new Option<string?>("--ui-view") { Description = "Open a repeatable visual-QA view: main, pill, paste-pill, settings, or settings-{voice,custom,replacements,audio,about}." };
+        var uiView = new Option<string?>("--ui-view") { Description = "Open a repeatable visual-QA view: main, pill, paste-pill, settings, or settings-{voice,custom,replacements,audio,about,credits}." };
         var root = new RootCommand("MetaVoiceType local Windows dictation");
         root.Options.Add(selfTest); root.Options.Add(listAudio); root.Options.Add(diagnostics); root.Options.Add(forceCpu); root.Options.Add(resetOnboarding); root.Options.Add(installModels); root.Options.Add(audioFile); root.Options.Add(dictationLanguage); root.Options.Add(commandLanguage); root.Options.Add(testCommand); root.Options.Add(stressMinutes); root.Options.Add(pasteText); root.Options.Add(recoveryCrashSeconds); root.Options.Add(uiView);
         ParseResult result = root.Parse(args);

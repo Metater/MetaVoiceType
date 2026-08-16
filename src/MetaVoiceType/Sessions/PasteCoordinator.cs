@@ -8,6 +8,8 @@ public enum PasteRequestState { Idle, Queued, Preparing, Pasting, Succeeded, Fai
 
 public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextInsertionService insertion, ILogger<PasteCoordinator> logger) : IDisposable
 {
+    internal static TimeSpan ReservationTimeout { get; set; } = TimeSpan.FromMinutes(2);
+    internal static TimeSpan TransactionTimeout { get; set; } = TimeSpan.FromSeconds(30);
     private readonly SemaphoreSlim _clipboardGate = new(1, 1);
     private readonly object _stateGate = new();
     private CancellationTokenSource? _pending;
@@ -30,7 +32,9 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
         lock (_stateGate)
         {
             if (_pending is not null) return PasteRequestResult.AlreadyPending;
-            _pending = new CancellationTokenSource();
+            _pending = new CancellationTokenSource(ReservationTimeout);
+            CancellationTokenSource request = _pending;
+            request.Token.Register(() => CancelExpiredReservation(request));
             _state = PasteRequestState.Queued;
         }
         StateChanged?.Invoke(this, PasteRequestState.Queued);
@@ -46,6 +50,7 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
             request = _pending ?? throw new InvalidOperationException("No paste request is reserved.");
             if (_state != PasteRequestState.Queued) throw new InvalidOperationException("The paste request already started.");
             _state = PasteRequestState.Preparing;
+            request.CancelAfter(TransactionTimeout);
         }
         StateChanged?.Invoke(this, PasteRequestState.Preparing);
         _ = ExecuteAsync(text, request, completed);
@@ -126,6 +131,21 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
     public void ResetTerminalState()
     {
         if (State is PasteRequestState.Succeeded or PasteRequestState.Failed or PasteRequestState.Canceled) SetState(PasteRequestState.Idle);
+    }
+
+    private void CancelExpiredReservation(CancellationTokenSource request)
+    {
+        bool changed = false;
+        lock (_stateGate)
+        {
+            if (ReferenceEquals(_pending, request) && _state == PasteRequestState.Queued)
+            {
+                _pending = null;
+                _state = PasteRequestState.Canceled;
+                changed = true;
+            }
+        }
+        if (changed) { StateChanged?.Invoke(this, PasteRequestState.Canceled); LogCanceled(logger); request.Dispose(); }
     }
 
     private void SetState(PasteRequestState state)

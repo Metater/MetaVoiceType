@@ -35,6 +35,8 @@ jobs:
         run: dotnet tool install --global vpk --version 1.2.0
       - if: steps.version.outputs.shouldRelease == 'true'
         shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: ./scripts/package.ps1 -Version "${{ steps.version.outputs.version }}" -SkipTests
       - if: steps.version.outputs.shouldRelease == 'true'
         uses: softprops/action-gh-release@v2

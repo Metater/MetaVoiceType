@@ -3,7 +3,8 @@ using MetaVoiceType.Audio;
 namespace MetaVoiceType.Core.Interfaces;
 
 public sealed record AudioDevice(string Id, string Name, bool IsDefault);
-public sealed record AudioMetrics(long FramesCaptured, int QueueDepth, int MaxQueueDepth, long LostFrames, double CallbackMilliseconds, long FramesDispatched = 0)
+public sealed record AudioMetrics(long FramesCaptured, int QueueDepth, int MaxQueueDepth, long LostFrames, double CallbackMilliseconds,
+    long FramesDispatched = 0, long SamplesQueued = 0)
 {
     public long FramesDropped => LostFrames;
     public int CaptureQueueHighWaterMark => MaxQueueDepth;

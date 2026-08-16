@@ -82,7 +82,7 @@ public sealed partial class JsonSettingsStore(AppPaths paths, ILogger<JsonSettin
 
         return settings with
         {
-            SchemaVersion = 5,
+            SchemaVersion = 6,
             OnboardingComplete = false,
             SetupCompletedOnce = settings.SetupCompletedOnce || settings.OnboardingComplete,
             CommandOverrides = new(StringComparer.OrdinalIgnoreCase),

@@ -2,7 +2,7 @@
 
 MetaVoiceType is a local-first Windows dictation app. Vosk listens locally for configurable voice commands; NVIDIA Parakeet transcribes only during recording. Command language and dictation language are independent.
 
-## Windows V1.3
+## Windows V1.4
 
 - Windows 10/11 x64, .NET 10, and Avalonia
 - Self-contained installer; no separate .NET or CUDA Toolkit setup
@@ -16,8 +16,9 @@ MetaVoiceType is a local-first Windows dictation app. Vosk listens locally for c
 - Explicit paste lifecycle and paste-only pill state, including paste/new-recording overlap
 - Purple Fluent interaction palette, responsive narrow layout, and internally scrolling live transcript
 - Voice-triggered Program, PowerShell, Command Prompt, and keyboard actions—including single keys such as Enter
-- Generic shortcuts when recording starts/stops, suitable for Discord, OBS, and other apps
-- One-second timestamp-aware pre-roll and lossless managed capture queues
+- Tap shortcuts at recording start/stop or hold a keybind for the full recording, suitable for Discord, OBS, and other apps
+- Timestamp-aware pre-roll, capture-tail draining, and lossless managed capture queues preserve final words
+- Velopack Zstandard delta updates download only changed package data when that is smaller than a full update
 
 Run `artifacts/releases/MetaVoiceType-win-Setup.exe`, then complete onboarding. English (US) is the default Vosk command language; Automatic Parakeet V3 is the default dictation mode. Twelve downloadable command languages are available.
 
@@ -26,10 +27,10 @@ Closing the window keeps the listener in the tray. Use **Exit MetaVoiceType** fr
 ## Discord mute while recording
 
 1. Open Discord **Settings → Keybinds**.
-2. Create a **Toggle Mute** keybind.
-3. In MetaVoiceType **Settings → General**, record the same keybind for both **When recording starts** and **When recording stops**.
+2. Create a **Push to Mute** keybind.
+3. In MetaVoiceType **Settings → General**, record it under **Hold while recording**.
 
-MetaVoiceType simply plays these shortcuts at recording start and end. It does not read Discord's mute state. The same feature works with any application shortcut.
+MetaVoiceType holds the configured keybind down from recording start until recording ends. It does not read Discord's mute state. Boundary shortcut taps remain available for toggle-style workflows.
 
 ## Privacy, recovery, and builds
 

@@ -31,7 +31,7 @@ public sealed class StabilizationTests : IDisposable
         AppSettings once = JsonSettingsStore.Migrate(source);
         AppSettings twice = JsonSettingsStore.Migrate(once);
 
-        Assert.Equal(5, once.SchemaVersion);
+        Assert.Equal(6, once.SchemaVersion);
         Assert.Equal(JsonSerializer.Serialize(once, AtomicJsonFile.Options), JsonSerializer.Serialize(twice, AtomicJsonFile.Options));
         Assert.All(once.CommandAliases.Values, language => Assert.All(language.Values, aliases =>
             Assert.Equal(aliases.Count, aliases.Distinct(StringComparer.OrdinalIgnoreCase).Count())));

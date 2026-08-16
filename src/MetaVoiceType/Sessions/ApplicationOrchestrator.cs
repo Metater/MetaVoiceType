@@ -37,6 +37,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
     private readonly Dictionary<string, string> _textFallbackPhrases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _canceledPasteSessions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Task> _recoveryCloseTasks = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Task> _finalizationTasks = new(StringComparer.Ordinal);
     private IAsrBackend? _backend;
     private string? _vadModelPath;
     private DictationSession? _active;
@@ -247,7 +248,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         if (preRollAfterSample is long after)
             foreach (AudioFrame frame in _preRoll.Snapshot(after, Interlocked.Read(ref _audioSampleClock))) AcceptForSession(session, frame);
         if (_actions.IsAllowed(ApplicationAction.RecordingEventShortcut))
-            _ = _recordingShortcuts.RecordingStartedAsync(session.Id, _settings.RecordingStartedShortcut);
+            _ = _recordingShortcuts.RecordingStartedAsync(session.Id, _settings.RecordingStartedShortcut, _settings.RecordingHeldShortcut);
         if (playCue) _cues.PlayAccepted(cue, _settings.CueVolume);
         return true;
     }
@@ -265,7 +266,8 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         lock (_gate) if (_active is null && !_actions.IsAllowed(ApplicationAction.ManualRecording)) return false;
         if (paste && _paste.Reserve() != PasteRequestResult.Accepted) { _cues.PlayError(_settings.CueVolume); return false; }
         DictationSession? session;
-        IReadOnlyList<DictationSegment> tail;
+        long acceptedThrough;
+        long captureThrough;
         lock (_gate)
         {
             session = _active;
@@ -273,15 +275,35 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
             _active = null;
             _lastStoppedSessionId = session.Id;
             if (paste) { session.RequestPaste(); _pendingPasteSessionId = session.Id; }
-            tail = session.Stop(canceled, paste);
-            _recoveryCloseTasks[session.Id] = _recovery.CloseAsync(session);
+            acceptedThrough = session.GlobalStartSample + session.SamplesAccepted;
+            captureThrough = _audio.Metrics.SamplesQueued;
             SetRecordingState(false, null, paste ? "Preparing paste…" : "Finalizing…");
         }
-        _decode.Finalize(session, tail);
+        Task finalization = FinalizeAfterCaptureDrainAsync(session, acceptedThrough, captureThrough, canceled, paste);
+        _finalizationTasks[session.Id] = finalization;
+        _ = finalization.ContinueWith(completed => _finalizationTasks.TryRemove(session.Id, out Task? ignored), CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         if (_actions.IsAllowed(ApplicationAction.RecordingEventShortcut))
             _ = _recordingShortcuts.RecordingEndedAsync(session.Id, _settings.RecordingStoppedShortcut);
         if (playCue) _cues.PlayAccepted(canceled ? VoiceCommand.CancelRecording : paste ? VoiceCommand.PasteRecording : VoiceCommand.StopRecording, _settings.CueVolume);
         return true;
+    }
+
+    private async Task FinalizeAfterCaptureDrainAsync(DictationSession session, long acceptedThrough, long captureThrough, bool canceled, bool paste)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(750));
+        try
+        {
+            while (Interlocked.Read(ref _audioSampleClock) < captureThrough)
+                await Task.Delay(5, timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { }
+
+        long availableThrough = Math.Min(captureThrough, Interlocked.Read(ref _audioSampleClock));
+        foreach (AudioFrame frame in _preRoll.Snapshot(acceptedThrough, availableThrough)) AcceptForSession(session, frame);
+        IReadOnlyList<DictationSegment> tail = session.Stop(canceled, paste);
+        _recoveryCloseTasks[session.Id] = _recovery.CloseAsync(session);
+        _decode.Finalize(session, tail);
     }
 
     public PasteRequestResult PasteHere()
@@ -644,7 +666,10 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         await Task.Yield();
         _audio.FrameReady -= OnAudioFrame; _audio.LevelChanged -= OnLevel; _decode.TranscriptChanged -= OnTranscriptChanged;
         _decode.SessionCompleted -= OnSessionCompleted; _commands.CommandRecognized -= OnVoiceCommand; _paste.StateChanged -= OnPasteStateChanged;
-        await _audio.DisposeAsync().ConfigureAwait(false); await _decode.DisposeAsync().ConfigureAwait(false); await _recovery.DisposeAsync().ConfigureAwait(false);
+        await _audio.DisposeAsync().ConfigureAwait(false);
+        await Task.WhenAll(_finalizationTasks.Values).ConfigureAwait(false);
+        await _decode.DisposeAsync().ConfigureAwait(false); await _recovery.DisposeAsync().ConfigureAwait(false);
+        await _recordingShortcuts.ReleaseAllAsync().ConfigureAwait(false);
         _commands.Dispose();
         lock (_gate)
         {

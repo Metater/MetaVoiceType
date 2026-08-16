@@ -39,6 +39,34 @@ public sealed class WindowsTextInsertionService : ITextInsertionService, IKeyboa
         return Task.CompletedTask;
     }
 
+    public Task PressShortcutAsync(ShortcutGesture shortcut, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var pressed = new List<KeyCode>();
+        try
+        {
+            foreach (KeyCode key in shortcut.Modifiers.Append(shortcut.Key))
+            {
+                EnsureSuccess(_simulator.SimulateKeyPress(key), key, "press");
+                pressed.Add(key);
+            }
+        }
+        catch
+        {
+            for (int i = pressed.Count - 1; i >= 0; i--) _simulator.SimulateKeyRelease(pressed[i]);
+            throw;
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task ReleaseShortcutAsync(ShortcutGesture shortcut, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        foreach (KeyCode key in shortcut.Modifiers.Append(shortcut.Key).Reverse())
+            EnsureSuccess(_simulator.SimulateKeyRelease(key), key, "release");
+        return Task.CompletedTask;
+    }
+
     private static void EnsureSuccess(UioHookResult result, KeyCode key, string action)
     {
         if (result != UioHookResult.Success) throw new InvalidOperationException($"SharpHook could not {action} {key}: {result}.");

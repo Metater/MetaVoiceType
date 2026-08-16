@@ -55,7 +55,7 @@ public sealed class StorageTests : IDisposable
         await File.WriteAllTextAsync(paths.SettingsFile, json, TestContext.Current.CancellationToken);
         var store = new JsonSettingsStore(paths, NullLogger<JsonSettingsStore>.Instance);
         AppSettings loaded = await store.LoadAsync(TestContext.Current.CancellationToken);
-        Assert.Equal(5, loaded.SchemaVersion);
+        Assert.Equal(6, loaded.SchemaVersion);
         Assert.Equal(AppTheme.Dark, loaded.Theme);
         Assert.Equal("Ctrl+Alt+K", loaded.ToggleHotkey);
         Assert.Equal(["put it there"], loaded.CommandAliases["en-us"]["pasteRecording"]);
