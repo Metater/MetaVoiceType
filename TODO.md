@@ -13,4 +13,4 @@
 - Split the About & updates area into separate sections/panels with explicit Version section, then Updates section.
 - Add a dedicated "Credits" tab in Settings listing all GitHub libraries used, with links and descriptions copied from their repositories/projects.
 - Add a feature to allow custom commands to send playback-like key events (e.g., a command for "meta enter" that simulates pressing Enter), enabling voice-triggered keypress execution.
-- Investigate/fix possible recording finalization cutoff where the finalization phase may truncate the last few words before completion.
+- Investigate/fix possible recording finalization cutoff where the finalization phase may truncate the last few words before completion.- Evaluate update pipeline and switch to differential/delta updates (delta patch format) so updates download/apply only changed files instead of full-package payloads.
