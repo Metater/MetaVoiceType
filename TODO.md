@@ -23,3 +23,5 @@
 - [x] Keep user preferences outside the install-owned local application directory so they survive uninstall/reinstall.
 - [x] Add per-page resets, a global settings reset, and per-model deletion controls.
 - [x] Correct CPU-only mode transitions and use consistent success/warning/error status colors.
+- [ ] Improve update and download progress feedback: the updater can appear stuck around 70%, so add finer-grained checkpoints to update and other app progress bars, and keep them visibly animated during long operations where exact progress is unavailable so the application never appears unresponsive.
+- [ ] On the custom commands creation page, refresh the left command list and spoken alias immediately after renaming a newly created command so the displayed name/alias update instead of remaining stale.
