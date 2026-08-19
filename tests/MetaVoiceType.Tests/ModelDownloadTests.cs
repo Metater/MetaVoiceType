@@ -59,6 +59,22 @@ public sealed class ModelDownloadTests : IDisposable
         Assert.DoesNotContain(Directory.EnumerateFileSystemEntries(_root), x => Path.GetFileName(x).StartsWith(".install-", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task ProgressUsesOverallCheckpointsAndIndeterminateLongRunningStages()
+    {
+        byte[] zip = Zip(("model/am/final.mdl", "model"));
+        var request = new ModelInstallRequest(new("https://example.test/model.zip"), "zip", "model", _root,
+            Convert.ToHexStringLower(SHA256.HashData(zip)), zip.Length, ["am/final.mdl"]);
+        var values = new List<ModelDownloadProgress>();
+
+        await Service(zip).InstallAsync(request, new InlineProgress<ModelDownloadProgress>(values.Add), TestContext.Current.CancellationToken);
+
+        Assert.Equal(100, values[^1].OverallPercentage);
+        Assert.Contains(values, value => value.Stage == "Verifying download" && value.IsIndeterminate);
+        Assert.Contains(values, value => value.Stage.StartsWith("Extracting", StringComparison.Ordinal) && value.IsIndeterminate);
+        Assert.True(values.Where(value => value.OverallPercentage is not null).Select(value => value.OverallPercentage!.Value).All(value => value is >= 0 and <= 100));
+    }
+
     private static ModelDownloadService Service(byte[] response) => new(new HttpClient(new StaticHandler(response)), NullLogger<ModelDownloadService>.Instance);
 
     private static byte[] Zip(params (string Path, string Content)[] entries)
@@ -95,5 +111,10 @@ public sealed class ModelDownloadTests : IDisposable
             Requests++;
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
         }
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 }

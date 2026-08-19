@@ -1,6 +1,7 @@
 namespace MetaVoiceType.Core.Interfaces;
 
-public sealed record ModelDownloadProgress(string Stage, long BytesDownloaded, long? TotalBytes, double BytesPerSecond)
+public sealed record ModelDownloadProgress(string Stage, long BytesDownloaded, long? TotalBytes, double BytesPerSecond,
+    double? OverallPercentage = null, bool IsIndeterminate = false)
 {
     public double? Percentage => TotalBytes is > 0 ? 100d * BytesDownloaded / TotalBytes : null;
 }

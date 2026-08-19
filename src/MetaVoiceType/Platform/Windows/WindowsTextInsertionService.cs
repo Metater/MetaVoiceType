@@ -12,6 +12,9 @@ public sealed class WindowsTextInsertionService : ITextInsertionService, IKeyboa
     public Task PasteAsync(CancellationToken cancellationToken = default) =>
         SendShortcutAsync(new(true, false, false, false, KeyCode.VcV), cancellationToken);
 
+    public Task SendEnterAsync(CancellationToken cancellationToken = default) =>
+        SendShortcutAsync(new(false, false, false, false, KeyCode.VcEnter), cancellationToken);
+
     public Task SendShortcutAsync(ShortcutGesture shortcut, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

@@ -56,6 +56,19 @@ public sealed class PasteCoordinatorTests
         Assert.Equal(PasteRequestResult.Accepted, coordinator.Reserve());
     }
 
+    [Fact]
+    public async Task PasteAndSendPressesEnterOnlyAfterPasteCompletes()
+    {
+        var insertion = new RecordingInsertion();
+        using var coordinator = new PasteCoordinator(new FakeClipboard(), insertion, NullLogger<PasteCoordinator>.Instance);
+
+        Assert.Equal(PasteRequestResult.Accepted, coordinator.Queue("message", sendEnter: true));
+        await WaitForTerminalAsync(coordinator);
+
+        Assert.Equal(["paste", "enter"], insertion.Events);
+        Assert.Equal(PasteRequestState.Succeeded, coordinator.State);
+    }
+
     private static async Task WaitForTerminalAsync(PasteCoordinator coordinator)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
@@ -74,9 +87,17 @@ public sealed class PasteCoordinatorTests
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Count { get; private set; }
         public async Task PasteAsync(CancellationToken cancellationToken = default) { Count++; Started.TrySetResult(); await Release.Task.WaitAsync(cancellationToken); }
+        public Task SendEnterAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
     private sealed class FailingInsertion : ITextInsertionService
     {
         public Task PasteAsync(CancellationToken cancellationToken = default) => throw new InvalidOperationException("test failure");
+        public Task SendEnterAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+    private sealed class RecordingInsertion : ITextInsertionService
+    {
+        public List<string> Events { get; } = [];
+        public Task PasteAsync(CancellationToken cancellationToken = default) { Events.Add("paste"); return Task.CompletedTask; }
+        public Task SendEnterAsync(CancellationToken cancellationToken = default) { Events.Add("enter"); return Task.CompletedTask; }
     }
 }

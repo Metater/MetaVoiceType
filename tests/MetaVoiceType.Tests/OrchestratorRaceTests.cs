@@ -261,6 +261,7 @@ public sealed class OrchestratorRaceTests
         public TaskCompletionSource Pasted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Count { get; private set; }
         public Task PasteAsync(CancellationToken cancellationToken = default) { Count++; Pasted.TrySetResult(); return Task.CompletedTask; }
+        public Task SendEnterAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class BlockingPasteInsertion : ITextInsertionService
@@ -272,6 +273,7 @@ public sealed class OrchestratorRaceTests
             Started.TrySetResult();
             await Release.Task.WaitAsync(cancellationToken);
         }
+        public Task SendEnterAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
 
     private sealed class FakeInput : IKeyboardInputSimulator

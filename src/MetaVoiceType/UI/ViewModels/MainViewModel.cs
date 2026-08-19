@@ -61,10 +61,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         BuiltInAliasEditors = new([
             new(VoiceCommand.StartRecording, "Start recording"), new(VoiceCommand.ContinueRecording, "Continue recording"),
             new(VoiceCommand.StopRecording, "Stop recording"), new(VoiceCommand.PasteRecording, "Paste Recording"),
+            new(VoiceCommand.PasteRecordingAndSend, "Paste recording and send"), new(VoiceCommand.SendEnter, "Send Enter"),
             new(VoiceCommand.CancelRecording, "Cancel recording"), new(VoiceCommand.CancelPaste, "Cancel paste"),
             new(VoiceCommand.CopyRecordingToClipboard, "Copy recording")]);
         foreach (CommandAliasEditorViewModel editor in BuiltInAliasEditors) editor.Aliases.Changed += (_, _) => ScheduleCommandSave();
-        CustomAliases.Changed += (_, _) => ScheduleCustomCommandSave();
+        CustomAliases.Changed += (_, _) => CustomAliasesChanged();
         SelectedVoiceLanguage = Languages.First(x => x.Id == "en-us");
         _spectrum.FrameReady += OnSpectrumFrame;
         State.History.CollectionChanged += (_, _) => { OnPropertyChanged(nameof(HasHistory)); OnPropertyChanged(nameof(CanCopyCurrent)); };
@@ -141,7 +142,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial int OnboardingStep { get; set; } = 1;
     [ObservableProperty] public partial VoiceCommandLanguage SelectedVoiceLanguage { get; set; }
     [ObservableProperty] public partial AudioDevice? SelectedAudioDevice { get; set; }
-    [ObservableProperty] public partial string SelectedDictationLanguage { get; set; } = "Automatic";
+    [ObservableProperty] public partial string SelectedDictationLanguage { get; set; } = "English";
     [ObservableProperty] public partial bool StartWithWindows { get; set; }
     [ObservableProperty] public partial bool CopyOnStop { get; set; } = true;
     [ObservableProperty] public partial bool PasteOnShortcutStop { get; set; }
@@ -153,6 +154,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial string DownloadStatus { get; set; } = "";
     [ObservableProperty] public partial string DownloadDetail { get; set; } = "";
     [ObservableProperty] public partial bool IsDownloading { get; set; }
+    [ObservableProperty] public partial bool IsDownloadProgressIndeterminate { get; set; }
     [ObservableProperty] public partial bool DownloadFailed { get; set; }
     [ObservableProperty] public partial bool ShowDeleteAllConfirmation { get; set; }
     [ObservableProperty] public partial string StartRecordingPhrase { get; set; } = "";
@@ -166,6 +168,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial string UpdateStatus { get; set; } = "Not checked";
     [ObservableProperty] public partial bool UpdateAvailable { get; set; }
     [ObservableProperty] public partial bool IsUpdating { get; set; }
+    [ObservableProperty] public partial bool IsUpdateProgressIndeterminate { get; set; }
     [ObservableProperty] public partial double UpdatePercent { get; set; }
     [ObservableProperty] public partial string HotkeyGesture { get; set; } = "Ctrl+Space";
     [ObservableProperty] public partial string HotkeyValidation { get; set; } = "";
@@ -439,6 +442,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
             State.VoiceModelState = "Downloading";
             string path = await _downloads.InstallAsync(SelectedVoiceLanguage.ToInstallRequest(_paths.VoskModels), Progress(SelectedVoiceLanguage.DisplayName), token);
             State.VoiceModelState = "Activating";
+            IsDownloadProgressIndeterminate = true;
+            DownloadPercent = 98;
             DownloadStatus = $"Activating {SelectedVoiceLanguage.DisplayName}";
             _orchestrator.InitializeVosk(path, SelectedVoiceLanguage);
             await _orchestrator.UpdateSettingsAsync(_orchestrator.Settings with { VoiceCommandLanguage = SelectedVoiceLanguage.Id }, token);
@@ -472,6 +477,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
             string vadPath = await _downloads.InstallAsync(vad.ToInstallRequest(_paths.DictationModels), Progress("Silero VAD"), token);
             string modelPath = await _downloads.InstallAsync(model.ToInstallRequest(_paths.DictationModels), Progress(model.DisplayName), token);
             State.DictationModelState = "Initializing";
+            IsDownloadProgressIndeterminate = true;
+            DownloadPercent = 98;
+            DownloadStatus = $"Initializing {model.DisplayName}";
             await _orchestrator.InitializeParakeetAsync(modelPath, model, vadPath, token);
             DictationMode mode = modelId == "parakeet-v2" ? DictationMode.English : DictationMode.Automatic;
             await _orchestrator.UpdateSettingsAsync(_orchestrator.Settings with { DictationMode = mode }, token);
@@ -484,7 +492,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         if (IsDownloading) return;
         _downloadCancellation = new();
-        IsDownloading = true; DownloadFailed = false; DownloadPercent = 0; DownloadDetail = "";
+        IsDownloading = true; DownloadFailed = false; DownloadPercent = 0; DownloadDetail = ""; IsDownloadProgressIndeterminate = true;
         try { await operation(_downloadCancellation.Token); }
         catch (OperationCanceledException) { DownloadStatus = "Download canceled"; }
         catch (Exception ex)
@@ -510,7 +518,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private Progress<ModelDownloadProgress> Progress(string name) => new(value => Dispatcher.UIThread.Post(() =>
     {
-        DownloadPercent = value.Percentage ?? 0;
+        DownloadPercent = Math.Clamp(value.OverallPercentage ?? value.Percentage ?? DownloadPercent, 0, 100);
+        IsDownloadProgressIndeterminate = value.IsIndeterminate;
         DownloadStatus = $"{name} · {value.Stage}";
         DownloadDetail = value.TotalBytes is long total ? $"{FormatBytes(value.BytesDownloaded)} / {FormatBytes(total)}" : FormatBytes(value.BytesDownloaded);
     }));
@@ -612,14 +621,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private async Task UpdateNowAsync()
     {
         IsUpdating = true;
+        IsUpdateProgressIndeterminate = true;
         UpdatePercent = 0;
-        UpdateStatus = "Downloading update · 0%";
+        UpdateStatus = "Preparing update";
         try
         {
-            await _updates.DownloadAndRestartAsync(new Progress<int>(value =>
+            await _updates.DownloadAndRestartAsync(new Progress<UpdateProgress>(value =>
             {
-                UpdatePercent = Math.Clamp(value, 0, 100);
-                UpdateStatus = $"Downloading update · {UpdatePercent:F0}%";
+                if (value.Percentage is double percentage) UpdatePercent = Math.Clamp(percentage, 0, 100);
+                IsUpdateProgressIndeterminate = value.IsIndeterminate;
+                UpdateStatus = value.Percentage is null ? value.Stage : $"{value.Stage} · {UpdatePercent:F0}%";
             }));
         }
         catch (Exception ex)
@@ -699,6 +710,16 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         var command = new CustomVoiceCommand { VoiceCommandLanguageId = SelectedVoiceLanguage.Id, Name = "New command", CommandType = CustomCommandType.Program, Aliases = [""] };
         CustomCommands.Add(command); SelectedCustomCommand = command;
+        ScheduleCustomCommandSave();
+    }
+
+    private void CustomAliasesChanged()
+    {
+        if (SelectedCustomCommand is not null)
+        {
+            SelectedCustomCommand.Aliases = CustomAliases.Values.ToList();
+            SelectedCustomCommand.Phrase = SelectedCustomCommand.Aliases.FirstOrDefault() ?? "";
+        }
         ScheduleCustomCommandSave();
     }
 
@@ -860,7 +881,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         _loading = true;
         SelectedAudioDevice = AudioDevices.FirstOrDefault(x => x.IsDefault) ?? AudioDevices.FirstOrDefault();
-        SelectedDictationLanguage = "Automatic";
+        SelectedDictationLanguage = "English";
         ForceCpuOnly = false;
         CueVolume = 0.6;
         _loading = false;
@@ -878,7 +899,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _loading = true;
         SelectedVoiceLanguage = Languages.First(x => x.Id == defaults.VoiceCommandLanguage);
         SelectedAudioDevice = AudioDevices.FirstOrDefault(x => x.IsDefault) ?? AudioDevices.FirstOrDefault();
-        SelectedDictationLanguage = "Automatic";
+        SelectedDictationLanguage = defaults.DictationMode == DictationMode.English ? "English" : "Automatic";
         StartWithWindows = defaults.StartWithWindows;
         CopyOnStop = defaults.CopyOnStop;
         PasteOnShortcutStop = defaults.PasteOnShortcutStop;

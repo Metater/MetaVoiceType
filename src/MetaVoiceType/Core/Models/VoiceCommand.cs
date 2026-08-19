@@ -6,6 +6,8 @@ public enum VoiceCommand
     ContinueRecording,
     StopRecording,
     PasteRecording,
+    PasteRecordingAndSend,
+    SendEnter,
     CancelRecording,
     CancelPaste,
     CopyRecordingToClipboard
@@ -19,6 +21,8 @@ public static class VoiceCommandKeys
         [VoiceCommand.ContinueRecording] = "continueRecording",
         [VoiceCommand.StopRecording] = "stopRecording",
         [VoiceCommand.PasteRecording] = "pasteRecording",
+        [VoiceCommand.PasteRecordingAndSend] = "pasteRecordingAndSend",
+        [VoiceCommand.SendEnter] = "sendEnter",
         [VoiceCommand.CancelRecording] = "cancelRecording",
         [VoiceCommand.CancelPaste] = "cancelPaste",
         [VoiceCommand.CopyRecordingToClipboard] = "copyRecordingToClipboard"

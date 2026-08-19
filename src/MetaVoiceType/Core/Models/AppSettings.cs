@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace MetaVoiceType.Core.Models;
 
@@ -21,12 +22,12 @@ public sealed class WordReplacementGroup
     public string Replacement { get; set; } = "";
 }
 
-public sealed class CustomVoiceCommand
+public sealed partial class CustomVoiceCommand : ObservableObject
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
-    public string Name { get; set; } = "New command";
+    [ObservableProperty] public partial string Name { get; set; } = "New command";
     public string VoiceCommandLanguageId { get; set; } = "en-us";
-    public string Phrase { get; set; } = "";
+    [ObservableProperty] public partial string Phrase { get; set; } = "";
     public List<string> Aliases { get; set; } = [];
     public bool Enabled { get; set; } = true;
     public CustomCommandType CommandType { get; set; }
@@ -48,7 +49,7 @@ public sealed record AppSettings
     public bool CheckForUpdates { get; init; } = true;
     public AppTheme Theme { get; init; } = AppTheme.System;
     public string VoiceCommandLanguage { get; init; } = "en-us";
-    public DictationMode DictationMode { get; init; } = DictationMode.Automatic;
+    public DictationMode DictationMode { get; init; } = DictationMode.English;
     public string? AudioDeviceId { get; init; }
     public bool CopyOnStop { get; init; } = true;
     public bool PasteOnShortcutStop { get; init; }

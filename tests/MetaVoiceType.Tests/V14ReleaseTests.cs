@@ -96,7 +96,7 @@ public sealed class V14ReleaseTests
         Assert.Contains("vpk @downloadArguments", packaging);
         Assert.Contains("--delta BestSize", packaging);
         Assert.Contains("Where-Object Name -ne $currentFullPackage", packaging);
-        Assert.Contains("<Version>1.4.1</Version>", props);
+        Assert.Contains("<Version>1.4.2</Version>", props);
         Assert.DoesNotContain("Save general settings", window);
         Assert.Contains("Reset all user settings", window);
         Assert.Contains("DeleteModelCommand", window);

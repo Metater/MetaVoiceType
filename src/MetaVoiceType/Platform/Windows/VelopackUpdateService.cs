@@ -18,12 +18,16 @@ public sealed class VelopackUpdateService : IUpdateService
         return _available?.TargetFullRelease.Version?.ToString();
     }
 
-    public async Task DownloadAndRestartAsync(IProgress<int>? progress = null, CancellationToken cancellationToken = default)
+    public async Task DownloadAndRestartAsync(IProgress<UpdateProgress>? progress = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        progress?.Report(new("Checking update package", null, true));
         _available ??= await _manager.CheckForUpdatesAsync().ConfigureAwait(false);
         if (_available is null) return;
-        await _manager.DownloadUpdatesAsync(_available, value => progress?.Report(value), cancellationToken).ConfigureAwait(false);
+        progress?.Report(new("Preparing differential update", null, true));
+        await _manager.DownloadUpdatesAsync(_available,
+            value => progress?.Report(new("Downloading and preparing update", Math.Clamp(value, 0, 100), true)), cancellationToken).ConfigureAwait(false);
+        progress?.Report(new("Applying verified update", 100, true));
         _manager.ApplyUpdatesAndRestart(_available.TargetFullRelease);
     }
 }

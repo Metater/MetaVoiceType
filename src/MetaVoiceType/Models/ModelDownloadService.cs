@@ -20,12 +20,14 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
         string archive = work + ".part";
         try
         {
+            progress?.Report(new("Preparing download", 0, request.ExpectedBytes, 0, 1, true));
             Directory.CreateDirectory(work);
             await File.WriteAllTextAsync(Path.Combine(work, ".artifact"), request.ExpectedDirectory, cancellationToken).ConfigureAwait(false);
             await DownloadAsync(request.ArchiveUrl, archive, request.ExpectedBytes, progress, cancellationToken).ConfigureAwait(false);
-            progress?.Report(new("Verifying", new FileInfo(archive).Length, request.ExpectedBytes, 0));
+            progress?.Report(new("Verifying download", new FileInfo(archive).Length, request.ExpectedBytes, 0, 72, true));
             await VerifySha256Async(archive, request.ArchiveSha256!, cancellationToken).ConfigureAwait(false);
-            progress?.Report(new("Extracting", new FileInfo(archive).Length, new FileInfo(archive).Length, 0));
+            progress?.Report(new("Download verified", new FileInfo(archive).Length, request.ExpectedBytes, 0, 76));
+            progress?.Report(new("Extracting files", 0, null, 0, 80, true));
             if (request.ArchiveType.Equals("zip", StringComparison.OrdinalIgnoreCase)) await ExtractZipAsync(archive, work, progress, cancellationToken).ConfigureAwait(false);
             else if (request.ArchiveType.Equals("tar.bz2", StringComparison.OrdinalIgnoreCase)) await ExtractArchiveAsync(archive, work, progress, cancellationToken).ConfigureAwait(false);
             else if (request.ArchiveType.Equals("file", StringComparison.OrdinalIgnoreCase))
@@ -37,8 +39,11 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
             }
             else throw new InvalidDataException($"Unsupported archive type '{request.ArchiveType}'.");
             string extracted = Path.Combine(work, request.ExpectedDirectory);
+            progress?.Report(new("Validating installed files", 0, null, 0, 94, true));
             if (!IsValidInstallation(extracted, request.RequiredFiles)) throw new InvalidDataException($"Archive did not contain a valid '{request.ExpectedDirectory}' installation.");
+            progress?.Report(new("Activating installation", 0, null, 0, 98, true));
             CommitDirectory(extracted, final);
+            progress?.Report(new("Installed", request.ExpectedBytes ?? 0, request.ExpectedBytes, 0, 100));
             LogInstalled(logger, request.ExpectedDirectory);
             return final;
         }
@@ -117,6 +122,7 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
 
     private async Task DownloadAsync(Uri url, string path, long? expectedBytes, IProgress<ModelDownloadProgress>? progress, CancellationToken cancellationToken)
     {
+        progress?.Report(new("Connecting", 0, expectedBytes, 0, 3, true));
         using HttpResponseMessage response = await httpClient.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         long? responseBytes = response.Content.Headers.ContentLength;
@@ -138,7 +144,8 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
             if (clock.ElapsedMilliseconds - lastProgressMilliseconds >= 250 || read == total)
             {
                 lastProgressMilliseconds = clock.ElapsedMilliseconds;
-                progress?.Report(new("Downloading", read, total, read / Math.Max(clock.Elapsed.TotalSeconds, 0.01)));
+                double? overall = total is > 0 ? 5 + (65d * read / total.Value) : null;
+                progress?.Report(new("Downloading", read, total, read / Math.Max(clock.Elapsed.TotalSeconds, 0.01), overall, total is null));
             }
         }
         await output.FlushAsync(cancellationToken).ConfigureAwait(false);
@@ -194,7 +201,7 @@ public sealed partial class ModelDownloadService(HttpClient httpClient, ILogger<
             {
                 lastProgressMilliseconds = clock.ElapsedMilliseconds;
                 progress?.Report(new($"Extracting {Path.GetFileName(name)}", written, totalBytes > 0 ? totalBytes : null,
-                    written / Math.Max(clock.Elapsed.TotalSeconds, 0.01)));
+                    written / Math.Max(clock.Elapsed.TotalSeconds, 0.01), 80, true));
             }
         }
     }

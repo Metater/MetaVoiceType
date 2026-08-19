@@ -18,12 +18,12 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
     public bool IsActive => State is PasteRequestState.Queued or PasteRequestState.Preparing or PasteRequestState.Pasting;
     public event EventHandler<PasteRequestState>? StateChanged;
 
-    public PasteRequestResult Queue(string text, Func<Task>? completed = null)
+    public PasteRequestResult Queue(string text, Func<Task>? completed = null, bool sendEnter = false)
     {
         if (string.IsNullOrWhiteSpace(text)) return PasteRequestResult.NoText;
         PasteRequestResult reservation = Reserve();
         if (reservation != PasteRequestResult.Accepted) return reservation;
-        StartReserved(text, completed);
+        StartReserved(text, completed, sendEnter);
         return PasteRequestResult.Accepted;
     }
 
@@ -41,7 +41,7 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
         return PasteRequestResult.Accepted;
     }
 
-    public void StartReserved(string text, Func<Task>? completed = null)
+    public void StartReserved(string text, Func<Task>? completed = null, bool sendEnter = false)
     {
         if (string.IsNullOrWhiteSpace(text)) throw new ArgumentException("Paste text cannot be blank.", nameof(text));
         CancellationTokenSource request;
@@ -53,7 +53,7 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
             request.CancelAfter(TransactionTimeout);
         }
         StateChanged?.Invoke(this, PasteRequestState.Preparing);
-        _ = ExecuteAsync(text, request, completed);
+        _ = ExecuteAsync(text, request, completed, sendEnter);
     }
 
     public void Cancel()
@@ -102,7 +102,9 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
         finally { _clipboardGate.Release(); }
     }
 
-    private async Task ExecuteAsync(string exactText, CancellationTokenSource request, Func<Task>? completed)
+    public Task SendEnterAsync(CancellationToken cancellationToken = default) => insertion.SendEnterAsync(cancellationToken);
+
+    private async Task ExecuteAsync(string exactText, CancellationTokenSource request, Func<Task>? completed, bool sendEnter)
     {
         var clock = System.Diagnostics.Stopwatch.StartNew();
         try
@@ -114,6 +116,7 @@ public sealed partial class PasteCoordinator(IClipboardService clipboard, ITextI
                 request.Token.ThrowIfCancellationRequested();
                 SetState(PasteRequestState.Pasting);
                 await insertion.PasteAsync(request.Token).ConfigureAwait(false);
+                if (sendEnter) await insertion.SendEnterAsync(request.Token).ConfigureAwait(false);
             }
             finally { _clipboardGate.Release(); }
             if (completed is not null) await completed().ConfigureAwait(false);

@@ -13,5 +13,7 @@ public interface IUpdateService
 {
     bool IsInstalled { get; }
     Task<string?> CheckAsync(CancellationToken cancellationToken = default);
-    Task DownloadAndRestartAsync(IProgress<int>? progress = null, CancellationToken cancellationToken = default);
+    Task DownloadAndRestartAsync(IProgress<UpdateProgress>? progress = null, CancellationToken cancellationToken = default);
 }
+
+public sealed record UpdateProgress(string Stage, double? Percentage = null, bool IsIndeterminate = false);

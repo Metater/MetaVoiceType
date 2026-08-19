@@ -16,7 +16,7 @@ public sealed record StartupOptions(bool SelfTest, bool ListAudioDevices, bool D
         var resetOnboarding = new Option<bool>("--reset-onboarding") { Description = "Show onboarding again without deleting other settings." };
         var installModels = new Option<bool>("--install-models") { Description = "Download and verify the default command and dictation models, then exit." };
         var audioFile = new Option<FileInfo?>("--audio-file") { Description = "Run both recognizers against an audio file, then exit." };
-        var dictationLanguage = new Option<string?>("--dictation-language") { Description = "Select Parakeet v2 with 'en' or multilingual Parakeet v3 with 'auto' (default: auto)." };
+        var dictationLanguage = new Option<string?>("--dictation-language") { Description = "Select Parakeet v2 with 'en' (default) or multilingual Parakeet v3 with 'auto'." };
         var commandLanguage = new Option<string?>("--command-language") { Description = "Select a Vosk diagnostic language (default: en-us)." };
         var testCommand = new Option<bool>("--test-command") { Description = "Require the supplied audio file to emit a configured Vosk command." };
         var stressMinutes = new Option<int>("--stress-minutes") { Description = "Stream the default microphone through both recognizers for the specified duration." };
@@ -32,7 +32,7 @@ public sealed record StartupOptions(bool SelfTest, bool ListAudioDevices, bool D
         int crashSeconds = result.GetValue(recoveryCrashSeconds);
         if (crashSeconds < 0) throw new ArgumentException("--recovery-crash-seconds cannot be negative.");
         return new(result.GetValue(selfTest), result.GetValue(listAudio), result.GetValue(diagnostics), result.GetValue(forceCpu), result.GetValue(resetOnboarding),
-            result.GetValue(installModels), result.GetValue(audioFile)?.FullName, result.GetValue(dictationLanguage) ?? "auto")
+            result.GetValue(installModels), result.GetValue(audioFile)?.FullName, result.GetValue(dictationLanguage) ?? "en")
         {
             CommandLanguage = result.GetValue(commandLanguage) ?? "en-us",
             TestCommand = result.GetValue(testCommand),

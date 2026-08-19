@@ -36,6 +36,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
     private readonly HashSet<IAsrBackend> _retiredBackends = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, string> _textFallbackPhrases = new(StringComparer.Ordinal);
     private readonly HashSet<string> _canceledPasteSessions = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _sendEnterAfterPasteSessions = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Task> _recoveryCloseTasks = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Task> _finalizationTasks = new(StringComparer.Ordinal);
     private IAsrBackend? _backend;
@@ -287,8 +288,9 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         return StartRecordingWithCue(VoiceCommand.ContinueRecording, preRollAfterSample, latest);
     }
 
-    public bool StopRecording(bool canceled = false, bool paste = false, bool playCue = true)
+    public bool StopRecording(bool canceled = false, bool paste = false, bool playCue = true, bool sendEnterAfterPaste = false)
     {
+        paste |= sendEnterAfterPaste;
         lock (_gate) if (_active is null && !_actions.IsAllowed(ApplicationAction.ManualRecording)) return false;
         if (paste && _paste.Reserve() != PasteRequestResult.Accepted) { _cues.PlayError(_settings.CueVolume); return false; }
         DictationSession? session;
@@ -300,7 +302,12 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
             if (session is null) { if (paste) _paste.Cancel(); _cues.PlayError(_settings.CueVolume); return false; }
             _active = null;
             _lastStoppedSessionId = session.Id;
-            if (paste) { session.RequestPaste(); _pendingPasteSessionId = session.Id; }
+            if (paste)
+            {
+                session.RequestPaste();
+                _pendingPasteSessionId = session.Id;
+                if (sendEnterAfterPaste) _sendEnterAfterPasteSessions.Add(session.Id);
+            }
             acceptedThrough = session.GlobalStartSample + session.SamplesAccepted;
             captureThrough = _audio.Metrics.SamplesQueued;
             SetRecordingState(false, null, paste ? "Preparing paste…" : "Finalizing…");
@@ -332,7 +339,11 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         _decode.Finalize(session, tail);
     }
 
-    public PasteRequestResult PasteHere()
+    public PasteRequestResult PasteHere() => PasteHere(sendEnter: false);
+
+    public PasteRequestResult PasteAndSend() => PasteHere(sendEnter: true);
+
+    private PasteRequestResult PasteHere(bool sendEnter)
     {
         if (!_actions.IsAllowed(ApplicationAction.PasteOrCopy)) return PasteRequestResult.Disabled;
         DictationSession? target;
@@ -350,21 +361,22 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
                     PasteRequestResult reservation = _paste.Reserve();
                     if (reservation != PasteRequestResult.Accepted) return reservation;
                     _pendingPasteSessionId = target.Id;
-                    _cues.PlayAccepted(VoiceCommand.PasteRecording, _settings.CueVolume);
+                    if (sendEnter) _sendEnterAfterPasteSessions.Add(target.Id);
+                    _cues.PlayAccepted(sendEnter ? VoiceCommand.PasteRecordingAndSend : VoiceCommand.PasteRecording, _settings.CueVolume);
                     return PasteRequestResult.Accepted;
                 }
             }
         }
-        if (target is not null && ReferenceEquals(target, _active) && StopRecording(paste: true)) return PasteRequestResult.Accepted;
+        if (target is not null && ReferenceEquals(target, _active) && StopRecording(paste: true, sendEnterAfterPaste: sendEnter)) return PasteRequestResult.Accepted;
         TranscriptRecord? latest = _state.History.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Text));
-        return PasteRecord(latest);
+        return PasteRecord(latest, sendEnter);
     }
 
-    public PasteRequestResult PasteRecord(TranscriptRecord? record)
+    public PasteRequestResult PasteRecord(TranscriptRecord? record, bool sendEnter = false)
     {
         if (!_actions.IsAllowed(ApplicationAction.PasteOrCopy)) return PasteRequestResult.Disabled;
-        PasteRequestResult result = _paste.Queue(record?.Text ?? "", () => MarkPastedAsync(record));
-        if (result == PasteRequestResult.Accepted) _cues.PlayAccepted(VoiceCommand.PasteRecording, _settings.CueVolume);
+        PasteRequestResult result = _paste.Queue(record?.Text ?? "", () => MarkPastedAsync(record), sendEnter);
+        if (result == PasteRequestResult.Accepted) _cues.PlayAccepted(sendEnter ? VoiceCommand.PasteRecordingAndSend : VoiceCommand.PasteRecording, _settings.CueVolume);
         else _cues.PlayError(_settings.CueVolume);
         return result;
     }
@@ -392,6 +404,7 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         lock (_gate)
         {
             if (_pendingPasteSessionId is not null) _canceledPasteSessions.Add(_pendingPasteSessionId);
+            if (_pendingPasteSessionId is not null) _sendEnterAfterPasteSessions.Remove(_pendingPasteSessionId);
             _pendingPasteSessionId = null;
         }
         _paste.Cancel();
@@ -503,6 +516,14 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
                 await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
                 PasteHere();
                 break;
+            case VoiceCommand.PasteRecordingAndSend:
+                await Task.Delay(TimeSpan.FromSeconds(1)).ConfigureAwait(false);
+                PasteAndSend();
+                break;
+            case VoiceCommand.SendEnter:
+                await _paste.SendEnterAsync().ConfigureAwait(false);
+                _cues.PlayAccepted(VoiceCommand.SendEnter, _settings.CueVolume);
+                break;
             case VoiceCommand.CancelRecording: StopRecording(canceled: true); break;
             case VoiceCommand.CancelPaste:
                 if (_pendingPasteSessionId is not null || _paste.IsActive) CancelPaste(); else _cues.PlayError(_settings.CueVolume);
@@ -578,14 +599,16 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
                 if (_active is null) _state.LiveTranscript = "";
             });
             bool pasteCanceled;
+            bool sendEnter;
             lock (_gate)
             {
                 pasteCanceled = _canceledPasteSessions.Remove(session.Id);
+                sendEnter = _sendEnterAfterPasteSessions.Remove(session.Id);
                 if (_pendingPasteSessionId == session.Id) _pendingPasteSessionId = null;
             }
             if (hasText && !session.Canceled && session.PasteRequested && !pasteCanceled)
             {
-                _paste.StartReserved(text, () => MarkPastedAsync(record));
+                _paste.StartReserved(text, () => MarkPastedAsync(record), sendEnter);
                 session.Pasted = true;
             }
             else if (session.PasteRequested && _paste.IsActive) _paste.Cancel();
@@ -596,7 +619,11 @@ public sealed partial class ApplicationOrchestrator : IAsyncDisposable
         catch (Exception ex)
         {
             if (session.PasteRequested) _paste.FailReserved();
-            lock (_gate) if (_pendingPasteSessionId == session.Id) _pendingPasteSessionId = null;
+            lock (_gate)
+            {
+                _sendEnterAfterPasteSessions.Remove(session.Id);
+                if (_pendingPasteSessionId == session.Id) _pendingPasteSessionId = null;
+            }
             LogCommitFailed(_logger, ex, session.Id);
             SetStatus("Could not save the transcript; recovery audio was preserved.");
         }
